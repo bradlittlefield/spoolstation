@@ -55,3 +55,36 @@ Mushroom mount dimensions:
 | Backlight | 27 — RESERVED |
 
 ## Repo structure
+
+firmware/    ESP32 Arduino sketch — LVGL UI, HX711, PN532, WiFi, Spoolman API, U1 sync
+bridge/      RPi Flask server — Spoolman API, Moonraker sync, filamentcolors.xyz, serial
+dashboard/   React web dashboard — inventory, station monitor, toolheads, activity log
+klipper/     Klipper macro + shell script for U1 print-start filament sync
+docs/        Setup guide, wiring reference HTML, blueprint HTML
+
+## Key integrations
+
+- **Spoolman** — self-hosted filament database (Docker on RPi, port 7912)
+- **Snapmaker U1 Moonraker** — filament state pushed via `/printer/filament_detect/set`
+- **filamentcolors.xyz** — colorimeter-measured hex values by vendor + color name, no auth
+- **OpenSpool** — open NFC tag JSON format for cross-platform filament data
+- **Extended Firmware** — enables U1 to read custom NTAG tags via OpenRFID
+
+## U1 integration note
+
+The station does not plug into the U1 directly. All communication is over LAN via
+Moonraker REST API. The U1's built-in RFID readers only read Snapmaker proprietary
+Mifare tags. Custom NTAG215 tags are read by the station's PN532 only. Filament
+data is pushed to U1 via Moonraker so Orca and the U1 display show correct profiles.
+
+Extended firmware: https://github.com/paxx12/SnapmakerU1-Extended-Firmware
+
+## Quick start
+
+See [docs/SETUP.md](docs/SETUP.md) for full setup, wiring, calibration, and Spoolman
+custom fields.
+
+## Status
+
+Hardware in hand. Firmware written. Physical enclosure pending Fusion 360 design.
+First flash and HX711 calibration are the next steps.
