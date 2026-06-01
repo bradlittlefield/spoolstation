@@ -266,7 +266,6 @@ Load cell horizontal, fixed end to riser back, free end toward viewer, mushroom 
 
 | Issue | Flag | Fix |
 |---|---|---|
-| Firmware header says "SpoolDesk" | Cosmetic only | Update to "SPOOLSTATION" at first flash cleanup |
 | GPIO 25 conflict | Critical | HX711 is on 18/19 because of GT911 reset on 25. Do not move. |
 | LVGL v9 installed | Breaks build | Install v8.3.x specifically. Check Library Manager. |
 | Weight reads noisy | Calibration issue | Increase `STABLE_THRESHOLD_G` or `STABLE_SAMPLES` in firmware. |

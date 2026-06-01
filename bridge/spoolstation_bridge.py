@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-SpoolDesk Bridge - Raspberry Pi
+SpoolStation Bridge - Raspberry Pi
 Reads Arduino serial → logs to Spoolman API → syncs to Snapmaker U1 via Moonraker
 
 INSTALL:
     pip install pyserial requests flask flask-cors
 
 RUN:
-    python3 spooldesk_bridge.py
+    python3 spoolstation_bridge.py
 
 CONFIG:
     Edit the CONFIG block below.
@@ -65,7 +65,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[logging.StreamHandler()]
 )
-log = logging.getLogger("spooldesk")
+log = logging.getLogger("spoolstation")
 
 # ─── SHARED STATE ─────────────────────────────────────────────────────────────
 state = {
@@ -981,7 +981,7 @@ if __name__ == "__main__":
     # Start U1 toolhead poller
     poll_thread = threading.Thread(target=u1_poll_loop, daemon=True)
     poll_thread.start()
-    log.info(f"SpoolDesk Bridge starting on port {CONFIG['bridge_port']}")
+    log.info(f"SpoolStation Bridge starting on port {CONFIG['bridge_port']}")
     log.info(f"Spoolman: {CONFIG['spoolman_url']}")
     log.info(f"U1: http://{CONFIG['u1_ip']}")
     app.run(host="0.0.0.0", port=CONFIG["bridge_port"], debug=False)

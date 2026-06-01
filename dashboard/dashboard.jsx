@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 
 // CONFIG
 const SPOOLMAN_BASE = "http://raspberrypi.local:7912";  // change to your RPi IP
-const BRIDGE_BASE   = "http://raspberrypi.local:8765";  // spooldesk_bridge.py
+const BRIDGE_BASE   = "http://raspberrypi.local:8765";  // spoolstation_bridge.py
 
 // COLOR LOOKUP via filamentcolors.xyz (proxied through bridge to avoid CORS)
 async function lookupFilamentColor(vendor, colorName, material = "PLA") {
@@ -896,7 +896,7 @@ export default function FilamentStation() {
             <div style={{ width: "28px", height: "28px", borderRadius: "7px", background: "linear-gradient(135deg, #00C9FF, #0065B3)", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <IconSpool />
             </div>
-            <span style={{ fontSize: "14px", fontWeight: "700", letterSpacing: "0.05em", color: "#F0F0F0" }}>SPOOLDESK</span>
+            <span style={{ fontSize: "14px", fontWeight: "700", letterSpacing: "0.05em", color: "#F0F0F0" }}>SPOOLSTATION</span>
           </div>
           <div style={{ width: "1px", height: "20px", background: "rgba(255,255,255,0.1)" }} />
           <nav style={{ display: "flex", gap: "4px" }}>

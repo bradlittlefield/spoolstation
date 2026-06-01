@@ -1,5 +1,5 @@
 /*
- * SpoolDesk Station Firmware
+ * SpoolStation Firmware
  * Target: ESP32-3248S035C (ST7796 display + GT911 capacitive touch)
  *
  * LIBRARIES REQUIRED (Arduino Library Manager):
@@ -550,7 +550,7 @@ void build_screen_idle() {
     lv_obj_set_style_radius(hdr, 0, LV_PART_MAIN);
 
     lv_obj_t* lbl_title = lv_label_create(hdr);
-    lv_label_set_text(lbl_title, "SPOOLDESK");
+    lv_label_set_text(lbl_title, "SPOOLSTATION");
     lv_obj_add_style(lbl_title, &style_title, LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_title, &lv_font_montserrat_16, LV_PART_MAIN);
     lv_obj_set_style_text_color(lbl_title, lv_color_make(0, 200, 255), LV_PART_MAIN);
@@ -933,7 +933,7 @@ void do_save() {
 // ─── SETUP ───────────────────────────────────────────────────────────────────
 void setup() {
     Serial.begin(115200);
-    Serial.println("SpoolDesk booting...");
+    Serial.println("SpoolStation booting...");
 
     // Backlight on
     pinMode(TFT_BL_PIN, OUTPUT);
