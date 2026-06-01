@@ -7,8 +7,7 @@ development without losing context. Read this before touching any code.
 
 ## Project identity
 
-**Name:** SpoolStation (was SpoolDesk earlier in development — some file names
-still say spooldesk, that is intentional for now)
+**Name:** SpoolStation
 **Repo:** bradlittlefield/spoolstation
 **Owner:** Brad Littlefield, Lead Electrical Designer, A&E firm, Andover MA
 **Surface Pro 8, 16GB. ADHD. Pragmatic. No over-engineering.**
@@ -255,8 +254,6 @@ Default from factory is usually HSU but confirm — wrong mode = no communicatio
 
 ## Known issues / things to watch for in debug
 
-- The firmware header still says "SpoolDesk" in some label strings — cosmetic only,
-  update to "SPOOLSTATION" when doing first flash cleanup
 - GPIO 25 conflict: GT911 touch uses GPIO 25 for reset. HX711 was moved to 18/19
   specifically because of this. Do not move it back.
 - LVGL v9 is NOT compatible with this firmware. Library Manager default may offer v9.
