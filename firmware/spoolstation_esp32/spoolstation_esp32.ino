@@ -45,21 +45,25 @@
  * PIN ASSIGNMENTS:
  *   HX711 SCK    -> GPIO 18
  *   HX711 DT     -> GPIO 19
- *   PN532 TX     -> GPIO 3  (Header A RX — UART0)
- *   PN532 RX     -> GPIO 1  (Header A TX — UART0)
+ *   PN532 TXD    -> GPIO 35  (Header B IO35 — ESP32 RX, input-only pin)
+ *   PN532 RXD    -> GPIO 22  (Header B IO22 — ESP32 TX)
  *   Display SPI  -> GPIO 13,14,15,2 (reserved, do not touch)
  *   Touch I2C    -> GPIO 33(SDA), 32(SCL), 21(IRQ), 25(RST)
  *
- * PN532 WIRING (Header A: VIN/TX/RX/GND):
- *   Header A VIN  -> PN532 VCC  (5V — HiLetGo V3 has onboard regulator, accepts 5V)
- *   Header A TX   -> PN532 RXD  (GPIO1)
- *   Header A RX   -> PN532 TXD  (GPIO3)
- *   Header A GND  -> PN532 GND
+ * PN532 WIRING:
+ *   Header B IO35  <-- PN532 TXD   (signal only, no power on this header)
+ *   Header B IO22  --> PN532 RXD   (signal only)
+ *   Header B GND   --- PN532 GND   (shared ground reference — REQUIRED)
+ *   Cut USB cable red  --> PN532 VCC  (5V from RPi USB port)
+ *   Cut USB cable black -> PN532 GND  (tie to ESP32 GND as well)
  *
- * IMPORTANT: Disconnect PN532 4-pin connector from Header A before flashing.
- * GPIO1/GPIO3 are shared with USB serial. Reconnect after flash, then power cycle.
- * Serial.begin() is NOT called — those pins belong to PN532 during operation.
- * Use the on-screen debug label (top of idle screen) for boot status instead.
+ * POWER:
+ *   ESP32 powered via RPi USB-A port (micro-USB cable)
+ *   PN532 powered via separate RPi USB-A port (cut USB cable, 5V+GND only)
+ *   Shared ground between ESP32 and PN532 via Header B GND — critical for UART
+ *
+ * Serial Monitor is fully functional (GPIO1/3 are free).
+ * No need to disconnect anything before flashing.
  */
 
 #include <Arduino.h>
@@ -91,34 +95,35 @@ struct SpoolData {
 };
 
 // ─── USER CONFIG ─────────────────────────────────────────────────────────────
-const char* WIFI_SSID     = "YOUR_WIFI_SSID";
-const char* WIFI_PASS     = "";
-const char* SPOOLMAN_URL  = "http://192.168.1.XXX:7912/api/v1";
-const char* BRIDGE_URL    = "http://192.168.1.XXX:8765";
+const char* WIFI_SSID    = "YOUR_WIFI_SSID";
+const char* WIFI_PASS    = "";
+const char* SPOOLMAN_URL = "http://192.168.1.XXX:7912/api/v1";
+const char* BRIDGE_URL   = "http://192.168.1.XXX:8765";
 
-float CALIBRATION_FACTOR  = -96650.0;
+float CALIBRATION_FACTOR = -96650.0;
 
 // ─── PIN DEFINITIONS ─────────────────────────────────────────────────────────
-#define HX711_SCK_PIN   18
-#define HX711_DT_PIN    19
+#define HX711_SCK_PIN  18
+#define HX711_DT_PIN   19
 
-// PN532 on UART0 (Header A) — GPIO1/GPIO3
-// Serial.begin() must NOT be called. Disconnect before flashing.
-#define PN532_RX_PIN    3     // ESP32 RX (Header A RX) — PN532 TXD connects here
-#define PN532_TX_PIN    1     // ESP32 TX (Header A TX) — PN532 RXD connects here
+// PN532 on UART2 via Header B
+// GPIO35 is input-only — ideal for RX. GPIO22 is TX.
+// Serial Monitor on UART0 (GPIO1/3) remains fully functional.
+#define PN532_RX_PIN   35   // Header B IO35 — PN532 TXD connects here
+#define PN532_TX_PIN   22   // Header B IO22 — PN532 RXD connects here
 
 // Touch GT911 I2C
-#define GT911_SDA_PIN   33
-#define GT911_SCL_PIN   32
-#define GT911_IRQ_PIN   21
-#define GT911_RST_PIN   25
+#define GT911_SDA_PIN  33
+#define GT911_SCL_PIN  32
+#define GT911_IRQ_PIN  21
+#define GT911_RST_PIN  25
 
-#define TFT_BL_PIN      27
+#define TFT_BL_PIN     27
 
 // ─── DISPLAY / LVGL ──────────────────────────────────────────────────────────
-#define SCREEN_W        480
-#define SCREEN_H        320
-#define LV_BUF_SIZE     (SCREEN_W * 20)
+#define SCREEN_W       480
+#define SCREEN_H       320
+#define LV_BUF_SIZE    (SCREEN_W * 20)
 
 TFT_eSPI tft = TFT_eSPI();
 static lv_disp_draw_buf_t draw_buf;
@@ -126,10 +131,9 @@ static lv_color_t         buf[LV_BUF_SIZE];
 
 // ─── TOUCH GT911 ─────────────────────────────────────────────────────────────
 // GT911 native resolution is portrait (480 tall x 320 wide internally mapped to
-// the physical 320x480 panel). For landscape rotation=1 we need to:
-//   physical_x (landscape) = GT911_y
-//   physical_y (landscape) = GT911_max_x - GT911_x
-// GT911 max raw values for this panel: x=479, y=319
+// the physical 320x480 panel). For landscape rotation=1:
+//   screen_x = raw_y
+//   screen_y = GT911_MAX_X - raw_x
 #define GT911_ADDR      0x5D
 #define GT911_COORD_REG 0x814E
 #define GT911_MAX_X     479
@@ -181,7 +185,7 @@ TouchPoint gt911_read() {
 
 // ─── HARDWARE INSTANCES ──────────────────────────────────────────────────────
 HX711          scale;
-HardwareSerial pn532Serial(0);   // UART0 — GPIO1(TX)/GPIO3(RX)
+HardwareSerial pn532Serial(2);   // UART2 — GPIO35(RX)/GPIO22(TX)
 Adafruit_PN532 nfc(pn532Serial);
 
 // ─── STATE ───────────────────────────────────────────────────────────────────
@@ -213,14 +217,6 @@ bool          g_wifi_ok           = false;
 float g_weight_buf[STABLE_SAMPLES];
 int   g_weight_idx      = 0;
 bool  g_weight_buf_full = false;
-
-// ─── ON-SCREEN DEBUG ─────────────────────────────────────────────────────────
-// Replaces Serial.print since GPIO1/3 are occupied by PN532
-lv_obj_t* lbl_debug = nullptr;
-
-void dbg(const String& msg) {
-    if (lbl_debug) lv_label_set_text(lbl_debug, msg.c_str());
-}
 
 // ─── LVGL DISPLAY FLUSH ──────────────────────────────────────────────────────
 void lv_disp_flush(lv_disp_drv_t* disp, const lv_area_t* area, lv_color_t* color_p) {
@@ -418,7 +414,7 @@ lv_obj_t* scr_unknown = nullptr;
 lv_obj_t* scr_saving  = nullptr;
 lv_obj_t* scr_saved   = nullptr;
 lv_obj_t* scr_error   = nullptr;
-lv_obj_t* scr_wifi    = nullptr;   // WiFi info popup screen
+lv_obj_t* scr_wifi    = nullptr;
 
 lv_obj_t* lbl_vendor       = nullptr;
 lv_obj_t* lbl_material     = nullptr;
@@ -429,7 +425,7 @@ lv_obj_t* lbl_weight_delta = nullptr;
 lv_obj_t* bar_filament     = nullptr;
 lv_obj_t* color_swatch     = nullptr;
 lv_obj_t* lbl_uid          = nullptr;
-lv_obj_t* lbl_wifi_icon    = nullptr;  // WiFi symbol in header
+lv_obj_t* lbl_wifi_icon    = nullptr;
 
 lv_obj_t* btn_t[4]     = {};
 lv_obj_t* btn_storage  = nullptr;
@@ -439,7 +435,6 @@ lv_obj_t* lbl_uid_unk    = nullptr;
 lv_obj_t* lbl_weight_unk = nullptr;
 lv_obj_t* lbl_saved_msg  = nullptr;
 
-// WiFi popup content labels
 lv_obj_t* lbl_wifi_ssid   = nullptr;
 lv_obj_t* lbl_wifi_ip     = nullptr;
 lv_obj_t* lbl_wifi_status = nullptr;
@@ -509,16 +504,17 @@ void setup_styles() {
 // ─── WIFI ICON UPDATE ────────────────────────────────────────────────────────
 void update_wifi_icon() {
     if (lbl_wifi_icon == nullptr) return;
-    lv_color_t col = g_wifi_ok ? lv_color_make(0, 200, 80) : lv_color_make(200, 40, 40);
+    lv_color_t col = g_wifi_ok
+        ? lv_color_make(0, 200, 80)
+        : lv_color_make(200, 40, 40);
     lv_obj_set_style_text_color(lbl_wifi_icon, col, LV_PART_MAIN);
 }
 
-// ─── BUILD WIFI POPUP SCREEN ─────────────────────────────────────────────────
+// ─── WIFI POPUP ──────────────────────────────────────────────────────────────
 void build_screen_wifi() {
     scr_wifi = lv_obj_create(nullptr);
     lv_obj_add_style(scr_wifi, &style_bg, LV_PART_MAIN);
 
-    // Card
     lv_obj_t* card = lv_obj_create(scr_wifi);
     lv_obj_set_size(card, 360, 200);
     lv_obj_align(card, LV_ALIGN_CENTER, 0, 0);
@@ -547,7 +543,6 @@ void build_screen_wifi() {
     lv_obj_set_style_text_color(lbl_wifi_ip, lv_color_make(140, 170, 220), LV_PART_MAIN);
     lv_obj_align(lbl_wifi_ip, LV_ALIGN_TOP_LEFT, 0, 76);
 
-    // Close button
     lv_obj_t* btn_close = lv_btn_create(card);
     lv_obj_set_size(btn_close, 100, 36);
     lv_obj_align(btn_close, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
@@ -565,7 +560,6 @@ void build_screen_wifi() {
 }
 
 void show_wifi_popup() {
-    // Populate with live data before showing
     if (lbl_wifi_status) {
         if (g_wifi_ok) {
             lv_label_set_text(lbl_wifi_status, "Connected");
@@ -575,9 +569,8 @@ void show_wifi_popup() {
             lv_obj_set_style_text_color(lbl_wifi_status, lv_color_make(200, 40, 40), LV_PART_MAIN);
         }
     }
-    if (lbl_wifi_ssid) {
+    if (lbl_wifi_ssid)
         lv_label_set_text(lbl_wifi_ssid, ("SSID: " + String(WIFI_SSID)).c_str());
-    }
     if (lbl_wifi_ip) {
         String ip = g_wifi_ok ? WiFi.localIP().toString() : "---";
         lv_label_set_text(lbl_wifi_ip, ("IP: " + ip).c_str());
@@ -612,7 +605,6 @@ void build_screen_idle() {
     scr_idle = lv_obj_create(nullptr);
     lv_obj_add_style(scr_idle, &style_bg, LV_PART_MAIN);
 
-    // Header
     lv_obj_t* hdr = lv_obj_create(scr_idle);
     lv_obj_set_size(hdr, 480, 44);
     lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 0);
@@ -626,7 +618,7 @@ void build_screen_idle() {
     lv_obj_set_style_text_color(lbl_title, lv_color_make(0, 200, 255), LV_PART_MAIN);
     lv_obj_align(lbl_title, LV_ALIGN_LEFT_MID, 16, 0);
 
-    // WiFi icon — tappable, red/green based on connection state
+    // WiFi icon — tappable, red/green based on actual connection state
     lbl_wifi_icon = lv_label_create(hdr);
     lv_label_set_text(lbl_wifi_icon, LV_SYMBOL_WIFI);
     lv_obj_set_style_text_font(lbl_wifi_icon, &lv_font_montserrat_16, LV_PART_MAIN);
@@ -636,15 +628,6 @@ void build_screen_idle() {
     lv_obj_add_event_cb(lbl_wifi_icon, [](lv_event_t*) {
         show_wifi_popup();
     }, LV_EVENT_CLICKED, nullptr);
-
-    // On-screen debug label — small, bottom of screen, used instead of Serial
-    lbl_debug = lv_label_create(scr_idle);
-    lv_label_set_text(lbl_debug, "Booting...");
-    lv_label_set_long_mode(lbl_debug, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_obj_set_width(lbl_debug, 460);
-    lv_obj_set_style_text_font(lbl_debug, &lv_font_montserrat_10, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_debug, lv_color_make(40, 60, 100), LV_PART_MAIN);
-    lv_obj_align(lbl_debug, LV_ALIGN_BOTTOM_MID, 0, -4);
 
     // Centered idle content
     lv_obj_t* icon = lv_label_create(scr_idle);
@@ -981,9 +964,8 @@ void do_save() {
 
 // ─── SETUP ───────────────────────────────────────────────────────────────────
 void setup() {
-    // NOTE: Serial.begin() intentionally omitted.
-    // GPIO1 and GPIO3 are used by PN532 (UART0, Header A).
-    // Use dbg() for on-screen status instead.
+    Serial.begin(115200);
+    Serial.println("SpoolStation booting...");
 
     pinMode(TFT_BL_PIN, OUTPUT);
     digitalWrite(TFT_BL_PIN, HIGH);
@@ -1020,25 +1002,25 @@ void setup() {
     build_screen_wifi();
     lv_scr_load(scr_idle);
 
-    dbg("HX711 init...");
+    Serial.println("HX711 init...");
     scale.begin(HX711_DT_PIN, HX711_SCK_PIN);
     scale.set_scale(CALIBRATION_FACTOR);
     // scale.tare(); // uncomment after HX711 is wired
+    Serial.println("HX711 ready.");
 
-    dbg("PN532 init...");
+    Serial.println("PN532 init...");
     pn532Serial.begin(115200, SERIAL_8N1, PN532_RX_PIN, PN532_TX_PIN);
     nfc.begin();
     uint32_t fw = nfc.getFirmwareVersion();
     if (fw) {
-        dbg("PN532 OK  FW:" + String((fw >> 16) & 0xFF) + "." + String((fw >> 8) & 0xFF));
+        Serial.printf("PN532 FW: %d.%d\n", (fw >> 16) & 0xFF, (fw >> 8) & 0xFF);
         nfc.setPassiveActivationRetries(0x01);
         nfc.SAMConfig();
     } else {
-        dbg("PN532 not found - check wiring + DIP switches");
+        Serial.println("PN532 not found - check wiring and DIP switches (HSU: both DOWN)");
     }
 
-    dbg("WiFi connecting...");
-    lv_timer_handler();
+    Serial.printf("Connecting to %s...\n", WIFI_SSID);
     WiFi.begin(WIFI_SSID, WIFI_PASS);
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 20) {
@@ -1048,12 +1030,12 @@ void setup() {
     }
     if (WiFi.status() == WL_CONNECTED) {
         g_wifi_ok = true;
-        dbg("WiFi OK  " + WiFi.localIP().toString());
+        Serial.printf("WiFi OK: %s\n", WiFi.localIP().toString().c_str());
     } else {
         g_wifi_ok = false;
         g_state   = StationState::WIFI_ERROR;
         lv_scr_load(scr_error);
-        dbg("WiFi FAILED");
+        Serial.println("WiFi FAILED");
     }
 
     update_wifi_icon();
@@ -1087,7 +1069,8 @@ void loop() {
 
         if (uid_str != g_last_uid) {
             g_last_uid = uid_str;
-            dbg("Tag: " + uid_str + "  " + String((int)g_weight_g) + "g");
+            Serial.printf("Tag: %s  Weight: %.1fg  Stable: %s\n",
+                uid_str.c_str(), g_weight_g, g_weight_stable ? "yes" : "no");
 
             if (g_state == StationState::IDLE || g_state == StationState::SAVED) {
                 g_state = StationState::TAG_READ;
