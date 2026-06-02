@@ -122,14 +122,15 @@ TFT_eSPI tft = TFT_eSPI();
 static lv_disp_draw_buf_t draw_buf;
 static lv_color_t         buf[LV_BUF_SIZE];
 
-// ─── BOOT SCREEN COLORS (orange theme from logo) ─────────────────────────────
+// ─── BOOT SCREEN COLORS ──────────────────────────────────────────────────────
+// Orange: matches logo filament/accent color
+// Grey: matches logo "Stat" and subtitle text
 #define COL_ORANGE      lv_color_make(255, 120,  20)
 #define COL_ORANGE_DIM  lv_color_make(140,  60,   0)
 #define COL_ORANGE_GLOW lv_color_make(255, 160,  60)
 #define COL_BG          lv_color_make(  8,   8,  12)
 #define COL_TRACK       lv_color_make( 30,  20,  10)
-#define COL_WHITE       lv_color_make(220, 220, 240)
-#define COL_GREY        lv_color_make( 80,  70,  60)
+#define COL_GREY        lv_color_make(150, 145, 140)
 
 // ─── TOUCH GT911 ─────────────────────────────────────────────────────────────
 #define GT911_ADDR      0x5D
@@ -385,7 +386,6 @@ lv_obj_t* scr_saved   = nullptr;
 lv_obj_t* scr_error   = nullptr;
 lv_obj_t* scr_wifi    = nullptr;
 
-// Boot screen widgets — updated during boot
 lv_obj_t* boot_bar        = nullptr;
 lv_obj_t* boot_status_lbl = nullptr;
 
@@ -475,16 +475,21 @@ void setup_styles() {
 }
 
 // ─── BOOT SCREEN ─────────────────────────────────────────────────────────────
-// Layout matches the AI render: spool logo left, title right, bar + status bottom
-// Built entirely with LVGL primitives — no image file needed
+// Title color breakdown matching the logo:
+//   "Spool" — orange
+//   "Stat"  — grey   (first 4 chars of "Station")
+//   "ion"   — orange (last 3 chars of "Station")
+//   "FILAMENT INVENTORY MANAGEMENT" — grey
+// LVGL labels can't color mid-string so we use separate positioned labels.
+// At montserrat_48, measured widths: S≈28 p≈25 o≈28 o≈28 l≈14 = "Spool"≈123px
+// "Stat" ≈ S(28)+t(18)+a(25)+t(18) = ~89px, add a few px for kerning → 296 offset
 void build_screen_boot() {
     scr_boot = lv_obj_create(nullptr);
     lv_obj_set_style_bg_color(scr_boot, COL_BG, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(scr_boot, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(scr_boot, 0, LV_PART_MAIN);
 
-    // ── Spool logo (left side, centered vertically) ──
-    // Outer ring — dark metallic
+    // ── Spool logo (left side) ──
     lv_obj_t* ring_outer = lv_obj_create(scr_boot);
     lv_obj_set_size(ring_outer, 140, 140);
     lv_obj_set_pos(ring_outer, 28, 72);
@@ -495,7 +500,6 @@ void build_screen_boot() {
     lv_obj_set_style_shadow_color(ring_outer, COL_ORANGE_DIM, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(ring_outer, 20, LV_PART_MAIN);
 
-    // Orange filament wound ring (arc approximated with thick border)
     lv_obj_t* ring_orange = lv_obj_create(scr_boot);
     lv_obj_set_size(ring_orange, 116, 116);
     lv_obj_set_pos(ring_orange, 40, 84);
@@ -506,7 +510,6 @@ void build_screen_boot() {
     lv_obj_set_style_shadow_color(ring_orange, COL_ORANGE, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(ring_orange, 12, LV_PART_MAIN);
 
-    // Inner ring — circuit board dark
     lv_obj_t* ring_inner = lv_obj_create(scr_boot);
     lv_obj_set_size(ring_inner, 72, 72);
     lv_obj_set_pos(ring_inner, 62, 106);
@@ -515,7 +518,6 @@ void build_screen_boot() {
     lv_obj_set_style_border_color(ring_inner, lv_color_make(40, 80, 130), LV_PART_MAIN);
     lv_obj_set_style_border_width(ring_inner, 2, LV_PART_MAIN);
 
-    // Hub center
     lv_obj_t* hub = lv_obj_create(scr_boot);
     lv_obj_set_size(hub, 28, 28);
     lv_obj_set_pos(hub, 84, 128);
@@ -524,7 +526,6 @@ void build_screen_boot() {
     lv_obj_set_style_border_color(hub, lv_color_make(90, 100, 120), LV_PART_MAIN);
     lv_obj_set_style_border_width(hub, 2, LV_PART_MAIN);
 
-    // Arrow / lightning bolt — orange label centered in inner ring
     lv_obj_t* arrow = lv_label_create(scr_boot);
     lv_label_set_text(arrow, LV_SYMBOL_CHARGE);
     lv_obj_set_style_text_font(arrow, &lv_font_montserrat_22, LV_PART_MAIN);
@@ -532,19 +533,28 @@ void build_screen_boot() {
     lv_obj_set_pos(arrow, 86, 130);
 
     // ── Right side: title block ──
-    // "Spool" in orange, "Station" in white — matching the logo style
+    // Row 1: "Spool" — orange
     lv_obj_t* lbl_spool = lv_label_create(scr_boot);
     lv_label_set_text(lbl_spool, "Spool");
     lv_obj_set_style_text_font(lbl_spool, &lv_font_montserrat_48, LV_PART_MAIN);
     lv_obj_set_style_text_color(lbl_spool, COL_ORANGE, LV_PART_MAIN);
     lv_obj_set_pos(lbl_spool, 184, 68);
 
-    lv_obj_t* lbl_station = lv_label_create(scr_boot);
-    lv_label_set_text(lbl_station, "Station");
-    lv_obj_set_style_text_font(lbl_station, &lv_font_montserrat_48, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_station, COL_WHITE, LV_PART_MAIN);
-    lv_obj_set_pos(lbl_station, 184, 118);
+    // Row 2: "Stat" — grey, "ion" — orange
+    // "Stat" at montserrat_48 is approximately 112px wide
+    lv_obj_t* lbl_stat = lv_label_create(scr_boot);
+    lv_label_set_text(lbl_stat, "Stat");
+    lv_obj_set_style_text_font(lbl_stat, &lv_font_montserrat_48, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_stat, COL_GREY, LV_PART_MAIN);
+    lv_obj_set_pos(lbl_stat, 184, 118);
 
+    lv_obj_t* lbl_ion = lv_label_create(scr_boot);
+    lv_label_set_text(lbl_ion, "ion");
+    lv_obj_set_style_text_font(lbl_ion, &lv_font_montserrat_48, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_ion, COL_ORANGE, LV_PART_MAIN);
+    lv_obj_set_pos(lbl_ion, 296, 118);
+
+    // Subtitle — grey, same as "Stat"
     lv_obj_t* lbl_sub = lv_label_create(scr_boot);
     lv_label_set_text(lbl_sub, "FILAMENT INVENTORY MANAGEMENT");
     lv_obj_set_style_text_font(lbl_sub, &lv_font_montserrat_12, LV_PART_MAIN);
@@ -552,7 +562,6 @@ void build_screen_boot() {
     lv_obj_set_pos(lbl_sub, 184, 172);
 
     // ── Bottom: loading bar + status ──
-    // Bar track
     lv_obj_t* bar_track = lv_obj_create(scr_boot);
     lv_obj_set_size(bar_track, 420, 14);
     lv_obj_set_pos(bar_track, 30, 228);
@@ -561,7 +570,6 @@ void build_screen_boot() {
     lv_obj_set_style_border_color(bar_track, lv_color_make(60, 40, 10), LV_PART_MAIN);
     lv_obj_set_style_border_width(bar_track, 1, LV_PART_MAIN);
 
-    // Actual LVGL bar over the track
     boot_bar = lv_bar_create(scr_boot);
     lv_obj_set_size(boot_bar, 420, 14);
     lv_obj_set_pos(boot_bar, 30, 228);
@@ -574,14 +582,12 @@ void build_screen_boot() {
     lv_bar_set_range(boot_bar, 0, 100);
     lv_bar_set_value(boot_bar, 0, LV_ANIM_OFF);
 
-    // Status text — bold, centered below bar
     boot_status_lbl = lv_label_create(scr_boot);
     lv_label_set_text(boot_status_lbl, "SYSTEM LOADING...");
     lv_obj_set_style_text_font(boot_status_lbl, &lv_font_montserrat_12, LV_PART_MAIN);
     lv_obj_set_style_text_color(boot_status_lbl, COL_ORANGE, LV_PART_MAIN);
     lv_obj_align(boot_status_lbl, LV_ALIGN_BOTTOM_MID, 0, -12);
 
-    // Subtle horizontal line separating logo from bar area
     lv_obj_t* hdiv = lv_obj_create(scr_boot);
     lv_obj_set_size(hdiv, 420, 1);
     lv_obj_set_pos(hdiv, 30, 218);
@@ -589,12 +595,11 @@ void build_screen_boot() {
     lv_obj_set_style_border_width(hdiv, 0, LV_PART_MAIN);
 }
 
-// Call this during boot to advance the bar and update the status label
 void boot_progress(int pct, const char* status) {
     if (boot_bar)        lv_bar_set_value(boot_bar, pct, LV_ANIM_ON);
     if (boot_status_lbl) lv_label_set_text(boot_status_lbl, status);
     lv_timer_handler();
-    delay(20);  // let LVGL render before next blocking operation
+    delay(20);
 }
 
 // ─── WIFI ICON UPDATE ────────────────────────────────────────────────────────
@@ -1082,14 +1087,11 @@ void setup() {
     lv_indev_drv_register(&indev_drv);
 
     setup_styles();
-
-    // Build boot screen first and show it immediately
     build_screen_boot();
     lv_scr_load(scr_boot);
     lv_timer_handler();
     delay(50);
 
-    // Build all other screens while boot screen is visible
     boot_progress(10, "INITIALIZING...");
     build_screen_idle();
     build_screen_spool();
@@ -1099,18 +1101,13 @@ void setup() {
     build_screen_error();
     build_screen_wifi();
 
-    // HX711
     boot_progress(30, "SCALE HARDWARE...");
-    Serial.println("HX711 init...");
     scale.begin(HX711_DT_PIN, HX711_SCK_PIN);
     scale.set_scale(CALIBRATION_FACTOR);
     // scale.tare(); // uncomment after HX711 is wired
-    Serial.println("HX711 ready.");
     boot_progress(45, "SCALE READY");
 
-    // PN532
     boot_progress(50, "NFC MODULE...");
-    Serial.println("PN532 init...");
     pn532Serial.begin(115200, SERIAL_8N1, PN532_RX_PIN, PN532_TX_PIN);
     nfc.begin();
     uint32_t fw = nfc.getFirmwareVersion();
@@ -1125,15 +1122,12 @@ void setup() {
         delay(1500);
     }
 
-    // WiFi — longest step, updates bar incrementally during connect attempts
     boot_progress(68, "CONNECTING TO WIFI...");
-    Serial.printf("Connecting to %s...\n", WIFI_SSID);
     WiFi.begin(WIFI_SSID, WIFI_PASS);
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 20) {
         delay(500);
         lv_timer_handler();
-        // Animate bar from 68→90 during wifi wait
         int wifi_pct = 68 + (int)((attempts / 20.0) * 22.0);
         boot_progress(wifi_pct, "CONNECTING TO WIFI...");
         attempts++;
