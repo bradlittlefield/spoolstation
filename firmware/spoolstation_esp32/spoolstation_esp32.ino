@@ -122,15 +122,32 @@ TFT_eSPI tft = TFT_eSPI();
 static lv_disp_draw_buf_t draw_buf;
 static lv_color_t         buf[LV_BUF_SIZE];
 
-// ─── BOOT SCREEN COLORS ──────────────────────────────────────────────────────
-// Orange: matches logo filament/accent color
-// Grey: matches logo "Stat" and subtitle text
+// ─── GLOBAL THEME PALETTE ────────────────────────────────────────────────────
+// All screens share this palette for visual consistency with the boot screen.
+//
+// Primary accent  : orange  (255,120,20)
+// Secondary text  : grey    (150,145,140)
+// Background      : near-black (8,8,12)
+// Card/surface    : dark charcoal (22,20,18)
+// Border          : dim orange-brown (60,40,15)
+// Header bar      : very dark orange-tinted (30,18,8)
+// Dim text        : muted brown-grey (90,80,65)
+// Value text      : warm light grey (220,210,195)
+// Save button     : green — semantic, kept intentionally
+// Error/warning   : red    — semantic, kept intentionally
+
 #define COL_ORANGE      lv_color_make(255, 120,  20)
 #define COL_ORANGE_DIM  lv_color_make(140,  60,   0)
 #define COL_ORANGE_GLOW lv_color_make(255, 160,  60)
+#define COL_ORANGE_DARK lv_color_make( 60,  30,   5)
 #define COL_BG          lv_color_make(  8,   8,  12)
-#define COL_TRACK       lv_color_make( 30,  20,  10)
+#define COL_SURFACE     lv_color_make( 22,  20,  18)
+#define COL_BORDER      lv_color_make( 60,  40,  15)
+#define COL_HDR         lv_color_make( 30,  18,   8)
 #define COL_GREY        lv_color_make(150, 145, 140)
+#define COL_GREY_DIM    lv_color_make( 90,  80,  65)
+#define COL_VALUE       lv_color_make(220, 210, 195)
+#define COL_TRACK       lv_color_make( 30,  20,  10)
 
 // ─── TOUCH GT911 ─────────────────────────────────────────────────────────────
 #define GT911_ADDR      0x5D
@@ -423,73 +440,69 @@ static lv_style_t style_dim;
 
 // ─── STYLE SETUP ─────────────────────────────────────────────────────────────
 void setup_styles() {
+    // Background — near-black
     lv_style_init(&style_bg);
-    lv_style_set_bg_color(&style_bg, lv_color_make(13, 13, 25));
+    lv_style_set_bg_color(&style_bg, COL_BG);
     lv_style_set_bg_opa(&style_bg, LV_OPA_COVER);
     lv_style_set_border_width(&style_bg, 0);
     lv_style_set_pad_all(&style_bg, 0);
 
+    // Card — dark charcoal with dim orange border
     lv_style_init(&style_card);
-    lv_style_set_bg_color(&style_card, lv_color_make(20, 28, 50));
+    lv_style_set_bg_color(&style_card, COL_SURFACE);
     lv_style_set_bg_opa(&style_card, LV_OPA_COVER);
-    lv_style_set_border_color(&style_card, lv_color_make(40, 80, 130));
+    lv_style_set_border_color(&style_card, COL_BORDER);
     lv_style_set_border_width(&style_card, 1);
     lv_style_set_radius(&style_card, 8);
     lv_style_set_pad_all(&style_card, 12);
 
+    // Inactive toolhead button — dark surface, dim orange border, grey text
     lv_style_init(&style_btn_inactive);
-    lv_style_set_bg_color(&style_btn_inactive, lv_color_make(20, 28, 50));
+    lv_style_set_bg_color(&style_btn_inactive, COL_SURFACE);
     lv_style_set_bg_opa(&style_btn_inactive, LV_OPA_COVER);
-    lv_style_set_border_color(&style_btn_inactive, lv_color_make(40, 80, 130));
+    lv_style_set_border_color(&style_btn_inactive, COL_BORDER);
     lv_style_set_border_width(&style_btn_inactive, 1);
     lv_style_set_radius(&style_btn_inactive, 6);
-    lv_style_set_text_color(&style_btn_inactive, lv_color_make(100, 140, 200));
+    lv_style_set_text_color(&style_btn_inactive, COL_GREY_DIM);
 
+    // Active toolhead button — orange-tinted background, bright orange border
     lv_style_init(&style_btn_active);
-    lv_style_set_bg_color(&style_btn_active, lv_color_make(0, 60, 100));
+    lv_style_set_bg_color(&style_btn_active, COL_ORANGE_DARK);
     lv_style_set_bg_opa(&style_btn_active, LV_OPA_COVER);
-    lv_style_set_border_color(&style_btn_active, lv_color_make(0, 180, 255));
+    lv_style_set_border_color(&style_btn_active, COL_ORANGE);
     lv_style_set_border_width(&style_btn_active, 2);
     lv_style_set_radius(&style_btn_active, 6);
-    lv_style_set_text_color(&style_btn_active, lv_color_make(0, 200, 255));
+    lv_style_set_text_color(&style_btn_active, COL_ORANGE);
 
+    // Save button — green, semantic
     lv_style_init(&style_btn_save);
-    lv_style_set_bg_color(&style_btn_save, lv_color_make(0, 80, 30));
+    lv_style_set_bg_color(&style_btn_save, lv_color_make(0, 60, 20));
     lv_style_set_bg_opa(&style_btn_save, LV_OPA_COVER);
-    lv_style_set_border_color(&style_btn_save, lv_color_make(0, 200, 80));
+    lv_style_set_border_color(&style_btn_save, lv_color_make(0, 180, 60));
     lv_style_set_border_width(&style_btn_save, 1);
     lv_style_set_radius(&style_btn_save, 8);
     lv_style_set_text_color(&style_btn_save, lv_color_make(80, 255, 120));
 
     lv_style_init(&style_title);
-    lv_style_set_text_color(&style_title, lv_color_make(0, 200, 255));
+    lv_style_set_text_color(&style_title, COL_ORANGE);
     lv_style_set_text_font(&style_title, &lv_font_montserrat_14);
 
     lv_style_init(&style_value);
-    lv_style_set_text_color(&style_value, lv_color_make(220, 235, 255));
+    lv_style_set_text_color(&style_value, COL_VALUE);
     lv_style_set_text_font(&style_value, &lv_font_montserrat_14);
 
     lv_style_init(&style_dim);
-    lv_style_set_text_color(&style_dim, lv_color_make(80, 100, 140));
+    lv_style_set_text_color(&style_dim, COL_GREY_DIM);
     lv_style_set_text_font(&style_dim, &lv_font_montserrat_12);
 }
 
 // ─── BOOT SCREEN ─────────────────────────────────────────────────────────────
-// Title color breakdown matching the logo:
-//   "Spool" — orange
-//   "Stat"  — grey   (first 4 chars of "Station")
-//   "ion"   — orange (last 3 chars of "Station")
-//   "FILAMENT INVENTORY MANAGEMENT" — grey
-// LVGL labels can't color mid-string so we use separate positioned labels.
-// At montserrat_48, measured widths: S≈28 p≈25 o≈28 o≈28 l≈14 = "Spool"≈123px
-// "Stat" ≈ S(28)+t(18)+a(25)+t(18) = ~89px, add a few px for kerning → 296 offset
 void build_screen_boot() {
     scr_boot = lv_obj_create(nullptr);
     lv_obj_set_style_bg_color(scr_boot, COL_BG, LV_PART_MAIN);
     lv_obj_set_style_bg_opa(scr_boot, LV_OPA_COVER, LV_PART_MAIN);
     lv_obj_set_style_border_width(scr_boot, 0, LV_PART_MAIN);
 
-    // ── Spool logo (left side) ──
     lv_obj_t* ring_outer = lv_obj_create(scr_boot);
     lv_obj_set_size(ring_outer, 140, 140);
     lv_obj_set_pos(ring_outer, 28, 72);
@@ -514,16 +527,16 @@ void build_screen_boot() {
     lv_obj_set_size(ring_inner, 72, 72);
     lv_obj_set_pos(ring_inner, 62, 106);
     lv_obj_set_style_radius(ring_inner, 36, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(ring_inner, lv_color_make(22, 30, 48), LV_PART_MAIN);
-    lv_obj_set_style_border_color(ring_inner, lv_color_make(40, 80, 130), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(ring_inner, COL_SURFACE, LV_PART_MAIN);
+    lv_obj_set_style_border_color(ring_inner, COL_BORDER, LV_PART_MAIN);
     lv_obj_set_style_border_width(ring_inner, 2, LV_PART_MAIN);
 
     lv_obj_t* hub = lv_obj_create(scr_boot);
     lv_obj_set_size(hub, 28, 28);
     lv_obj_set_pos(hub, 84, 128);
     lv_obj_set_style_radius(hub, 14, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(hub, lv_color_make(50, 55, 70), LV_PART_MAIN);
-    lv_obj_set_style_border_color(hub, lv_color_make(90, 100, 120), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(hub, lv_color_make(50, 45, 40), LV_PART_MAIN);
+    lv_obj_set_style_border_color(hub, COL_GREY, LV_PART_MAIN);
     lv_obj_set_style_border_width(hub, 2, LV_PART_MAIN);
 
     lv_obj_t* arrow = lv_label_create(scr_boot);
@@ -532,16 +545,14 @@ void build_screen_boot() {
     lv_obj_set_style_text_color(arrow, COL_ORANGE_GLOW, LV_PART_MAIN);
     lv_obj_set_pos(arrow, 86, 130);
 
-    // ── Right side: title block ──
-    // Row 1: "Spool" — orange
+    // "Spool" — orange
     lv_obj_t* lbl_spool = lv_label_create(scr_boot);
     lv_label_set_text(lbl_spool, "Spool");
     lv_obj_set_style_text_font(lbl_spool, &lv_font_montserrat_48, LV_PART_MAIN);
     lv_obj_set_style_text_color(lbl_spool, COL_ORANGE, LV_PART_MAIN);
     lv_obj_set_pos(lbl_spool, 184, 68);
 
-    // Row 2: "Stat" — grey, "ion" — orange
-    // "Stat" at montserrat_48 is approximately 112px wide
+    // "Stat" — grey, "ion" — orange
     lv_obj_t* lbl_stat = lv_label_create(scr_boot);
     lv_label_set_text(lbl_stat, "Stat");
     lv_obj_set_style_text_font(lbl_stat, &lv_font_montserrat_48, LV_PART_MAIN);
@@ -554,20 +565,18 @@ void build_screen_boot() {
     lv_obj_set_style_text_color(lbl_ion, COL_ORANGE, LV_PART_MAIN);
     lv_obj_set_pos(lbl_ion, 296, 118);
 
-    // Subtitle — grey, same as "Stat"
     lv_obj_t* lbl_sub = lv_label_create(scr_boot);
     lv_label_set_text(lbl_sub, "FILAMENT INVENTORY MANAGEMENT");
     lv_obj_set_style_text_font(lbl_sub, &lv_font_montserrat_12, LV_PART_MAIN);
     lv_obj_set_style_text_color(lbl_sub, COL_GREY, LV_PART_MAIN);
     lv_obj_set_pos(lbl_sub, 184, 172);
 
-    // ── Bottom: loading bar + status ──
     lv_obj_t* bar_track = lv_obj_create(scr_boot);
     lv_obj_set_size(bar_track, 420, 14);
     lv_obj_set_pos(bar_track, 30, 228);
     lv_obj_set_style_radius(bar_track, 7, LV_PART_MAIN);
     lv_obj_set_style_bg_color(bar_track, COL_TRACK, LV_PART_MAIN);
-    lv_obj_set_style_border_color(bar_track, lv_color_make(60, 40, 10), LV_PART_MAIN);
+    lv_obj_set_style_border_color(bar_track, COL_ORANGE_DIM, LV_PART_MAIN);
     lv_obj_set_style_border_width(bar_track, 1, LV_PART_MAIN);
 
     boot_bar = lv_bar_create(scr_boot);
@@ -591,7 +600,7 @@ void build_screen_boot() {
     lv_obj_t* hdiv = lv_obj_create(scr_boot);
     lv_obj_set_size(hdiv, 420, 1);
     lv_obj_set_pos(hdiv, 30, 218);
-    lv_obj_set_style_bg_color(hdiv, lv_color_make(50, 35, 10), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(hdiv, COL_BORDER, LV_PART_MAIN);
     lv_obj_set_style_border_width(hdiv, 0, LV_PART_MAIN);
 }
 
@@ -624,31 +633,32 @@ void build_screen_wifi() {
     lv_obj_t* lbl_title = lv_label_create(card);
     lv_label_set_text(lbl_title, LV_SYMBOL_WIFI "  WiFi Status");
     lv_obj_set_style_text_font(lbl_title, &lv_font_montserrat_16, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_title, lv_color_make(0, 200, 255), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_title, COL_ORANGE, LV_PART_MAIN);
     lv_obj_align(lbl_title, LV_ALIGN_TOP_LEFT, 0, 0);
 
     lbl_wifi_status = lv_label_create(card);
     lv_label_set_text(lbl_wifi_status, "---");
     lv_obj_set_style_text_font(lbl_wifi_status, &lv_font_montserrat_14, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_wifi_status, COL_VALUE, LV_PART_MAIN);
     lv_obj_align(lbl_wifi_status, LV_ALIGN_TOP_LEFT, 0, 30);
 
     lbl_wifi_ssid = lv_label_create(card);
     lv_label_set_text(lbl_wifi_ssid, "SSID: ---");
     lv_obj_set_style_text_font(lbl_wifi_ssid, &lv_font_montserrat_12, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_wifi_ssid, lv_color_make(140, 170, 220), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_wifi_ssid, COL_GREY, LV_PART_MAIN);
     lv_obj_align(lbl_wifi_ssid, LV_ALIGN_TOP_LEFT, 0, 56);
 
     lbl_wifi_ip = lv_label_create(card);
     lv_label_set_text(lbl_wifi_ip, "IP: ---");
     lv_obj_set_style_text_font(lbl_wifi_ip, &lv_font_montserrat_12, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_wifi_ip, lv_color_make(140, 170, 220), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_wifi_ip, COL_GREY, LV_PART_MAIN);
     lv_obj_align(lbl_wifi_ip, LV_ALIGN_TOP_LEFT, 0, 76);
 
     lv_obj_t* btn_close = lv_btn_create(card);
     lv_obj_set_size(btn_close, 100, 36);
     lv_obj_align(btn_close, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
-    lv_obj_set_style_bg_color(btn_close, lv_color_make(0, 40, 80), LV_PART_MAIN);
-    lv_obj_set_style_border_color(btn_close, lv_color_make(0, 120, 200), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(btn_close, COL_ORANGE_DARK, LV_PART_MAIN);
+    lv_obj_set_style_border_color(btn_close, COL_ORANGE, LV_PART_MAIN);
     lv_obj_set_style_border_width(btn_close, 1, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(btn_close, 0, LV_PART_MAIN);
     lv_obj_add_event_cb(btn_close, [](lv_event_t*) {
@@ -656,7 +666,7 @@ void build_screen_wifi() {
     }, LV_EVENT_CLICKED, nullptr);
     lv_obj_t* lbl_close = lv_label_create(btn_close);
     lv_label_set_text(lbl_close, "Close");
-    lv_obj_set_style_text_color(lbl_close, lv_color_make(0, 200, 255), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_close, COL_ORANGE, LV_PART_MAIN);
     lv_obj_center(lbl_close);
 }
 
@@ -708,14 +718,14 @@ void build_screen_idle() {
     lv_obj_t* hdr = lv_obj_create(scr_idle);
     lv_obj_set_size(hdr, 480, 44);
     lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_set_style_bg_color(hdr, lv_color_make(0, 40, 80), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(hdr, COL_HDR, LV_PART_MAIN);
     lv_obj_set_style_border_width(hdr, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(hdr, 0, LV_PART_MAIN);
 
     lv_obj_t* lbl_title = lv_label_create(hdr);
     lv_label_set_text(lbl_title, "SPOOLSTATION");
     lv_obj_set_style_text_font(lbl_title, &lv_font_montserrat_16, LV_PART_MAIN);
-    lv_obj_set_style_text_color(lbl_title, lv_color_make(0, 200, 255), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_title, COL_ORANGE, LV_PART_MAIN);
     lv_obj_align(lbl_title, LV_ALIGN_LEFT_MID, 16, 0);
 
     lbl_wifi_icon = lv_label_create(hdr);
@@ -731,18 +741,18 @@ void build_screen_idle() {
     lv_obj_t* icon = lv_label_create(scr_idle);
     lv_label_set_text(icon, LV_SYMBOL_UPLOAD);
     lv_obj_set_style_text_font(icon, &lv_font_montserrat_48, LV_PART_MAIN);
-    lv_obj_set_style_text_color(icon, lv_color_make(30, 50, 90), LV_PART_MAIN);
+    lv_obj_set_style_text_color(icon, COL_ORANGE_DIM, LV_PART_MAIN);
     lv_obj_align(icon, LV_ALIGN_CENTER, 0, -10);
 
     lv_obj_t* lbl_hang = lv_label_create(scr_idle);
     lv_label_set_text(lbl_hang, "Hang spool to begin");
-    lv_obj_set_style_text_color(lbl_hang, lv_color_make(60, 90, 140), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_hang, COL_GREY, LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_hang, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_align(lbl_hang, LV_ALIGN_CENTER, 0, 46);
 
     lv_obj_t* lbl_sub = lv_label_create(scr_idle);
     lv_label_set_text(lbl_sub, "NFC tag will be read automatically");
-    lv_obj_set_style_text_color(lbl_sub, lv_color_make(40, 60, 100), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_sub, COL_GREY_DIM, LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_sub, &lv_font_montserrat_12, LV_PART_MAIN);
     lv_obj_align(lbl_sub, LV_ALIGN_CENTER, 0, 66);
 }
@@ -755,13 +765,13 @@ void build_screen_spool() {
     lv_obj_t* hdr = lv_obj_create(scr_spool);
     lv_obj_set_size(hdr, 480, 40);
     lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_set_style_bg_color(hdr, lv_color_make(0, 40, 80), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(hdr, COL_HDR, LV_PART_MAIN);
     lv_obj_set_style_border_width(hdr, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(hdr, 0, LV_PART_MAIN);
 
     lv_obj_t* lbl_hdr = lv_label_create(hdr);
     lv_label_set_text(lbl_hdr, "SPOOL IDENTIFIED");
-    lv_obj_set_style_text_color(lbl_hdr, lv_color_make(0, 200, 255), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_hdr, COL_ORANGE, LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_hdr, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_align(lbl_hdr, LV_ALIGN_LEFT_MID, 12, 0);
 
@@ -769,80 +779,80 @@ void build_screen_spool() {
     lv_obj_set_size(color_swatch, 52, 52);
     lv_obj_set_pos(color_swatch, 12, 48);
     lv_obj_set_style_radius(color_swatch, 26, LV_PART_MAIN);
-    lv_obj_set_style_border_color(color_swatch, lv_color_make(60, 80, 120), LV_PART_MAIN);
+    lv_obj_set_style_border_color(color_swatch, COL_BORDER, LV_PART_MAIN);
     lv_obj_set_style_border_width(color_swatch, 2, LV_PART_MAIN);
 
     lbl_vendor = lv_label_create(scr_spool);
     lv_label_set_text(lbl_vendor, "---");
-    lv_obj_set_style_text_color(lbl_vendor, lv_color_make(0, 180, 255), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_vendor, COL_ORANGE, LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_vendor, &lv_font_montserrat_16, LV_PART_MAIN);
     lv_obj_set_pos(lbl_vendor, 74, 50);
 
     lbl_material = lv_label_create(scr_spool);
     lv_label_set_text(lbl_material, "---");
-    lv_obj_set_style_text_color(lbl_material, lv_color_make(140, 170, 220), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_material, COL_GREY, LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_material, &lv_font_montserrat_12, LV_PART_MAIN);
     lv_obj_set_pos(lbl_material, 74, 72);
 
     lbl_name = lv_label_create(scr_spool);
     lv_label_set_text(lbl_name, "---");
-    lv_obj_set_style_text_color(lbl_name, lv_color_make(180, 200, 240), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_name, COL_VALUE, LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_name, &lv_font_montserrat_12, LV_PART_MAIN);
     lv_obj_set_pos(lbl_name, 74, 88);
 
     lbl_uid = lv_label_create(scr_spool);
     lv_label_set_text(lbl_uid, "UID: ---");
-    lv_obj_set_style_text_color(lbl_uid, lv_color_make(40, 60, 100), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_uid, COL_GREY_DIM, LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_uid, &lv_font_montserrat_10, LV_PART_MAIN);
     lv_obj_set_pos(lbl_uid, 12, 108);
 
     lv_obj_t* vdiv = lv_obj_create(scr_spool);
     lv_obj_set_size(vdiv, 1, 268);
     lv_obj_set_pos(vdiv, 228, 44);
-    lv_obj_set_style_bg_color(vdiv, lv_color_make(30, 50, 90), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(vdiv, COL_BORDER, LV_PART_MAIN);
     lv_obj_set_style_border_width(vdiv, 0, LV_PART_MAIN);
 
     lv_obj_t* lbl_w_title = lv_label_create(scr_spool);
     lv_label_set_text(lbl_w_title, "REMAINING");
-    lv_obj_set_style_text_color(lbl_w_title, lv_color_make(60, 90, 140), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_w_title, COL_GREY_DIM, LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_w_title, &lv_font_montserrat_10, LV_PART_MAIN);
     lv_obj_set_pos(lbl_w_title, 238, 50);
 
     lbl_weight = lv_label_create(scr_spool);
     lv_label_set_text(lbl_weight, "---g");
-    lv_obj_set_style_text_color(lbl_weight, lv_color_make(0, 200, 255), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_weight, COL_ORANGE, LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_weight, &lv_font_montserrat_22, LV_PART_MAIN);
     lv_obj_set_pos(lbl_weight, 238, 63);
 
     lbl_length = lv_label_create(scr_spool);
     lv_label_set_text(lbl_length, "~---m");
-    lv_obj_set_style_text_color(lbl_length, lv_color_make(100, 140, 200), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_length, COL_GREY, LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_length, &lv_font_montserrat_12, LV_PART_MAIN);
     lv_obj_set_pos(lbl_length, 238, 90);
 
     lbl_weight_delta = lv_label_create(scr_spool);
     lv_label_set_text(lbl_weight_delta, "");
-    lv_obj_set_style_text_color(lbl_weight_delta, lv_color_make(255, 160, 40), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_weight_delta, COL_ORANGE_GLOW, LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_weight_delta, &lv_font_montserrat_12, LV_PART_MAIN);
     lv_obj_set_pos(lbl_weight_delta, 380, 70);
 
     bar_filament = lv_bar_create(scr_spool);
     lv_obj_set_size(bar_filament, 228, 8);
     lv_obj_set_pos(bar_filament, 238, 108);
-    lv_obj_set_style_bg_color(bar_filament, lv_color_make(20, 30, 55), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(bar_filament, lv_color_make(0, 180, 255), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(bar_filament, COL_TRACK, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(bar_filament, COL_ORANGE, LV_PART_INDICATOR);
     lv_bar_set_range(bar_filament, 0, 100);
     lv_bar_set_value(bar_filament, 50, LV_ANIM_OFF);
 
     lv_obj_t* hdiv = lv_obj_create(scr_spool);
     lv_obj_set_size(hdiv, 228, 1);
     lv_obj_set_pos(hdiv, 238, 124);
-    lv_obj_set_style_bg_color(hdiv, lv_color_make(30, 50, 90), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(hdiv, COL_BORDER, LV_PART_MAIN);
     lv_obj_set_style_border_width(hdiv, 0, LV_PART_MAIN);
 
     lv_obj_t* lbl_assign = lv_label_create(scr_spool);
     lv_label_set_text(lbl_assign, "ASSIGN TO:");
-    lv_obj_set_style_text_color(lbl_assign, lv_color_make(60, 90, 140), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_assign, COL_GREY_DIM, LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_assign, &lv_font_montserrat_10, LV_PART_MAIN);
     lv_obj_set_pos(lbl_assign, 238, 130);
 
@@ -890,11 +900,11 @@ void build_screen_saving() {
     lv_obj_t* spinner = lv_spinner_create(scr_saving, 1000, 60);
     lv_obj_set_size(spinner, 60, 60);
     lv_obj_align(spinner, LV_ALIGN_CENTER, 0, -20);
-    lv_obj_set_style_arc_color(spinner, lv_color_make(0, 180, 255), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(spinner, COL_ORANGE, LV_PART_INDICATOR);
 
     lv_obj_t* lbl = lv_label_create(scr_saving);
     lv_label_set_text(lbl, "Saving to Spoolman...");
-    lv_obj_set_style_text_color(lbl, lv_color_make(0, 180, 255), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl, COL_ORANGE, LV_PART_MAIN);
     lv_obj_align(lbl, LV_ALIGN_CENTER, 0, 36);
 }
 
@@ -919,6 +929,7 @@ void build_screen_saved() {
 }
 
 // ─── BUILD UNKNOWN TAG SCREEN ────────────────────────────────────────────────
+// Unknown spool keeps amber warning tones — consistent with the orange theme
 void build_screen_unknown() {
     scr_unknown = lv_obj_create(nullptr);
     lv_obj_add_style(scr_unknown, &style_bg, LV_PART_MAIN);
@@ -926,25 +937,25 @@ void build_screen_unknown() {
     lv_obj_t* hdr = lv_obj_create(scr_unknown);
     lv_obj_set_size(hdr, 480, 40);
     lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_set_style_bg_color(hdr, lv_color_make(80, 40, 0), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(hdr, lv_color_make(60, 30, 0), LV_PART_MAIN);
     lv_obj_set_style_border_width(hdr, 0, LV_PART_MAIN);
     lv_obj_set_style_radius(hdr, 0, LV_PART_MAIN);
 
     lv_obj_t* lbl_hdr = lv_label_create(hdr);
     lv_label_set_text(lbl_hdr, "UNKNOWN SPOOL");
-    lv_obj_set_style_text_color(lbl_hdr, lv_color_make(255, 180, 0), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_hdr, COL_ORANGE, LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_hdr, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_align(lbl_hdr, LV_ALIGN_LEFT_MID, 12, 0);
 
     lbl_uid_unk = lv_label_create(scr_unknown);
     lv_label_set_text(lbl_uid_unk, "UID: ---");
-    lv_obj_set_style_text_color(lbl_uid_unk, lv_color_make(255, 160, 40), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_uid_unk, COL_ORANGE_GLOW, LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_uid_unk, &lv_font_montserrat_10, LV_PART_MAIN);
     lv_obj_set_pos(lbl_uid_unk, 12, 50);
 
     lbl_weight_unk = lv_label_create(scr_unknown);
     lv_label_set_text(lbl_weight_unk, "Weight: ---g");
-    lv_obj_set_style_text_color(lbl_weight_unk, lv_color_make(0, 200, 255), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_weight_unk, COL_ORANGE, LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_weight_unk, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_set_pos(lbl_weight_unk, 12, 66);
 
@@ -952,15 +963,15 @@ void build_screen_unknown() {
     lv_label_set_text(lbl_inst, "Open dashboard to register this spool.\nUID and weight have been sent to bridge.");
     lv_label_set_long_mode(lbl_inst, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(lbl_inst, 456);
-    lv_obj_set_style_text_color(lbl_inst, lv_color_make(140, 160, 200), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_inst, COL_GREY, LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_inst, &lv_font_montserrat_12, LV_PART_MAIN);
     lv_obj_set_pos(lbl_inst, 12, 100);
 
     lv_obj_t* btn_dismiss = lv_btn_create(scr_unknown);
     lv_obj_set_size(btn_dismiss, 200, 44);
     lv_obj_align(btn_dismiss, LV_ALIGN_BOTTOM_MID, 0, -16);
-    lv_obj_set_style_bg_color(btn_dismiss, lv_color_make(40, 30, 0), LV_PART_MAIN);
-    lv_obj_set_style_border_color(btn_dismiss, lv_color_make(200, 120, 0), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(btn_dismiss, COL_ORANGE_DARK, LV_PART_MAIN);
+    lv_obj_set_style_border_color(btn_dismiss, COL_ORANGE, LV_PART_MAIN);
     lv_obj_set_style_border_width(btn_dismiss, 1, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(btn_dismiss, 0, LV_PART_MAIN);
     lv_obj_add_event_cb(btn_dismiss, [](lv_event_t*) {
@@ -969,7 +980,7 @@ void build_screen_unknown() {
     }, LV_EVENT_CLICKED, nullptr);
     lv_obj_t* lbl_d = lv_label_create(btn_dismiss);
     lv_label_set_text(lbl_d, "Dismiss");
-    lv_obj_set_style_text_color(lbl_d, lv_color_make(255, 180, 0), LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_d, COL_ORANGE, LV_PART_MAIN);
     lv_obj_center(lbl_d);
 }
 
@@ -1014,10 +1025,11 @@ void update_spool_screen(const SpoolData& s, float new_weight, float old_weight)
     int pct   = (int)((new_weight / (float)(total - s.tare_weight)) * 100.0);
     pct = max(0, min(100, pct));
     lv_bar_set_value(bar_filament, pct, LV_ANIM_ON);
+    // Bar color: red when critical, orange-dim when low, orange when healthy
     lv_obj_set_style_bg_color(bar_filament,
         pct < 15 ? lv_color_make(200, 40, 40) :
-        pct < 30 ? lv_color_make(220, 140, 0) :
-                   hex_to_lv_color(s.color_hex),
+        pct < 30 ? COL_ORANGE_DIM :
+                   COL_ORANGE,
         LV_PART_INDICATOR);
 
     String uid_short = s.tag_uid.length() > 20
