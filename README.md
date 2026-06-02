@@ -19,11 +19,17 @@ in the web dashboard simultaneously.
 
 | Component | Role |
 |---|---|
-| ESP32-3248S035C | Main controller + 3.5" 320x480 capacitive touchscreen (ST7796 + GT911) |
+| ESP32-3248S035C | Main controller + 3.5" 480x320 landscape capacitive touchscreen (ST7796 + GT911) |
 | HX711 + 5kg straight bar load cell | Weighing |
 | PN532 NFC V3 module | NTAG215 tag read/write (OpenSpool protocol, UART/HSU mode) |
 | Raspberry Pi 3B | Runs Spoolman (Docker, port 7912) + bridge server (port 8765) |
 | NTAG215 sticker tags | One per spool, 504 byte capacity |
+
+## Display
+
+The firmware runs in **landscape orientation (480x320)**. The display is the
+ESP32-3248S035C with ST7796 driver and GT911 capacitive touch. Touch coordinates
+are remapped in firmware for landscape mode.
 
 ## Enclosure concept
 
@@ -47,20 +53,26 @@ Mushroom mount dimensions:
 | HX711 SCK | 18 |
 | HX711 DT | 19 |
 | PN532 TX → ESP32 RX | 22 (UART2 RX) |
-| PN532 RX → ESP32 TX | 17 (UART2 TX) |
+| PN532 RX ← ESP32 TX | 17 (UART2 TX) — not exposed on headers, requires solder |
 | Display SPI | 13, 14, 15, 2 — RESERVED |
 | Touch I2C | 33 (SDA), 32 (SCL) — RESERVED |
 | Touch RST | 25 — RESERVED |
 | Touch IRQ | 21 — RESERVED |
 | Backlight | 27 — RESERVED |
 
+**Note:** GPIO 17 is not broken out on any header of the ESP32-3248S035C. The station
+reads NFC tags without it (RX only). Writing to tags requires GPIO 17 to be connected,
+which requires soldering or a different ESP32 dev board.
+
 ## Repo structure
 
-firmware/    ESP32 Arduino sketch — LVGL UI, HX711, PN532, WiFi, Spoolman API, U1 sync
+```
+firmware/    ESP32 Arduino sketch — LVGL UI (landscape), HX711, PN532, WiFi, Spoolman API, U1 sync
 bridge/      RPi Flask server — Spoolman API, Moonraker sync, filamentcolors.xyz, serial
 dashboard/   React web dashboard — inventory, station monitor, toolheads, activity log
 klipper/     Klipper macro + shell script for U1 print-start filament sync
-docs/        Setup guide, wiring reference HTML, blueprint HTML
+docs/        Setup guide, wiring reference
+```
 
 ## Key integrations
 
@@ -86,5 +98,6 @@ custom fields.
 
 ## Status
 
-Hardware in hand. Firmware written. Physical enclosure pending Fusion 360 design.
-First flash and HX711 calibration are the next steps.
+Hardware in hand. Firmware flashed and running. Display confirmed working in landscape
+mode. WiFi connecting. HX711 calibration and PN532 wiring pending physical enclosure
+completion. Enclosure design in progress (Fusion 360).
