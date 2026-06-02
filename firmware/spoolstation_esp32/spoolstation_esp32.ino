@@ -1,14 +1,14 @@
 /*
  * SpoolStation Firmware
  * Target: ESP32-3248S035C (ST7796 display + GT911 capacitive touch)
+ * Orientation: LANDSCAPE (480x320)
  *
  * LIBRARIES REQUIRED (Arduino Library Manager):
  *   - TFT_eSPI by Bodmer (configure User_Setup.h — see below)
- *   - LVGL by kisvegabor (v8.3.x — NOT v9, incompatible with this config)
+ *   - LVGL by kisvegabor (v8.4.x — NOT v9, incompatible with this config)
  *   - HX711 Arduino Library by bogde
  *   - Adafruit PN532 by Adafruit
  *   - ArduinoJson by Benoit Blanchon
- *   - GT911 by Luca Dentella (or use bb_captouch)
  *
  * TFT_eSPI User_Setup.h config — replace contents with:
  * -------------------------------------------------------
@@ -39,7 +39,7 @@
  *   Board: ESP32 Dev Module
  *   CPU Freq: 240MHz
  *   Flash Size: 4MB
- *   Partition Scheme: Default 4MB with spiffs
+ *   Partition Scheme: Huge APP (3MB No OTA/1MB SPIFFS)
  *   Upload Speed: 921600
  *
  * PIN ASSIGNMENTS:
@@ -82,7 +82,7 @@ struct SpoolData {
 // ─── USER CONFIG ─────────────────────────────────────────────────────────────
 // Edit these before flashing
 
-const char* WIFI_SSID     = "Hyannis Harbor Hotel WiFi";
+const char* WIFI_SSID     = "YOUR_WIFI_SSID";
 const char* WIFI_PASS     = "";
 const char* SPOOLMAN_URL  = "http://192.168.1.XXX:7912/api/v1";   // RPi IP
 const char* BRIDGE_URL    = "http://192.168.1.XXX:8765";           // RPi bridge
@@ -106,8 +106,9 @@ float CALIBRATION_FACTOR  = -96650.0;
 #define TFT_BL_PIN      27
 
 // ─── DISPLAY / LVGL ──────────────────────────────────────────────────────────
-#define SCREEN_W        320
-#define SCREEN_H        480
+// Landscape: 480 wide, 320 tall
+#define SCREEN_W        480
+#define SCREEN_H        320
 #define LV_BUF_SIZE     (SCREEN_W * 20)
 
 TFT_eSPI tft = TFT_eSPI();
@@ -115,7 +116,6 @@ static lv_disp_draw_buf_t draw_buf;
 static lv_color_t         buf[LV_BUF_SIZE];
 
 // ─── TOUCH GT911 ─────────────────────────────────────────────────────────────
-// Minimal GT911 driver inline (avoids library version conflicts)
 #define GT911_ADDR      0x5D
 #define GT911_COORD_REG 0x814E
 
@@ -143,12 +143,12 @@ TouchPoint gt911_read() {
         if (status & 0x80) {
             tp.pressed = (status & 0x0F) > 0;
             if (tp.pressed) {
-                Wire.read(); // skip track ID
+                Wire.read();
                 uint8_t xl = Wire.read(); uint8_t xh = Wire.read();
                 uint8_t yl = Wire.read(); uint8_t yh = Wire.read();
-                tp.x = ((xh << 8) | xl);
-                tp.y = ((yh << 8) | yl);
-                // clear status register
+                // Swap x/y for landscape
+                tp.x = ((yh << 8) | yl);
+                tp.y = SCREEN_H - ((xh << 8) | xl);
                 Wire.beginTransmission(GT911_ADDR);
                 Wire.write(GT911_COORD_REG >> 8);
                 Wire.write(GT911_COORD_REG & 0xFF);
@@ -160,22 +160,22 @@ TouchPoint gt911_read() {
     return tp;
 }
 
-// ─── HARDWARE INSTANCES ───────────────────────────────────────────────────────
+// ─── HARDWARE INSTANCES ──────────────────────────────────────────────────────
 HX711       scale;
 HardwareSerial pn532Serial(2);
 Adafruit_PN532 nfc(pn532Serial);
 
-// ─── STATE ────────────────────────────────────────────────────────────────────
+// ─── STATE ───────────────────────────────────────────────────────────────────
 enum class StationState {
-    IDLE,           // waiting for spool
-    TAG_READ,       // tag detected, reading weight
-    SPOOL_FOUND,    // known spool — showing info + action buttons
-    UNKNOWN_TAG,    // tag not in Spoolman
-    WEIGHING,       // waiting for weight to stabilize
-    SAVING,         // posting to Spoolman
-    SAVED,          // confirmation screen
-    WIFI_ERROR,     // network issue
-    NO_TAG_WEIGHT   // weight but no tag
+    IDLE,
+    TAG_READ,
+    SPOOL_FOUND,
+    UNKNOWN_TAG,
+    WEIGHING,
+    SAVING,
+    SAVED,
+    WIFI_ERROR,
+    NO_TAG_WEIGHT
 };
 
 StationState  g_state        = StationState::IDLE;
@@ -185,17 +185,17 @@ float         g_weight_g     = 0;
 bool          g_weight_stable = false;
 unsigned long g_last_tag_ms  = 0;
 unsigned long g_stable_since = 0;
-int           g_selected_toolhead = 0;  // 0=storage, 1-4=T1-T4
+int           g_selected_toolhead = 0;
 bool          g_saving       = false;
+bool          g_wifi_ok      = false;
 
-// Weight stability
 #define STABLE_THRESHOLD_G   2.0
 #define STABLE_SAMPLES       6
 float g_weight_buf[STABLE_SAMPLES];
 int   g_weight_idx = 0;
 bool  g_weight_buf_full = false;
 
-// ─── LVGL DISPLAY FLUSH ───────────────────────────────────────────────────────
+// ─── LVGL DISPLAY FLUSH ──────────────────────────────────────────────────────
 void lv_disp_flush(lv_disp_drv_t* disp, const lv_area_t* area, lv_color_t* color_p) {
     uint32_t w = area->x2 - area->x1 + 1;
     uint32_t h = area->y2 - area->y1 + 1;
@@ -225,15 +225,6 @@ lv_color_t hex_to_lv_color(const String& hex) {
     if (h.length() < 6) return lv_color_white();
     long c = strtol(h.c_str(), nullptr, 16);
     return lv_color_make((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF);
-}
-
-uint16_t hex_to_565(const String& hex) {
-    String h = hex; h.replace("#","");
-    long c = strtol(h.c_str(), nullptr, 16);
-    uint8_t r = (c >> 16) & 0xFF;
-    uint8_t g = (c >> 8) & 0xFF;
-    uint8_t b = c & 0xFF;
-    return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
 }
 
 // ─── WEIGHT HELPERS ──────────────────────────────────────────────────────────
@@ -267,7 +258,7 @@ String format_uid(uint8_t* uid, uint8_t len) {
     return s;
 }
 
-// ─── HTTP HELPERS ─────────────────────────────────────────────────────────────
+// ─── HTTP HELPERS ────────────────────────────────────────────────────────────
 String http_get(const String& url) {
     HTTPClient http;
     http.begin(url);
@@ -359,7 +350,6 @@ bool update_spool_weight(int spool_id, float remaining_g, float remaining_length
 }
 
 bool push_to_u1(const SpoolData& s, int channel) {
-    // channel is 0-indexed (T1=0, T2=1, T3=2, T4=3)
     String c = s.color_hex;
     c.replace("#","");
     long rgb = strtol(c.c_str(), nullptr, 16);
@@ -381,9 +371,9 @@ bool push_to_u1(const SpoolData& s, int channel) {
     return http_post(String(BRIDGE_URL) + "/u1/toolhead/" + channel, json);
 }
 
-// ─── LENGTH CALCULATION ───────────────────────────────────────────────────────
+// ─── LENGTH CALCULATION ──────────────────────────────────────────────────────
 float calc_length_m(float weight_g, const String& material, float diameter_mm = 1.75) {
-    float density = 1.24; // PLA default
+    float density = 1.24;
     if (material == "PETG" || material == "PETG-CF") density = 1.27;
     else if (material == "ABS") density = 1.04;
     else if (material == "ASA") density = 1.07;
@@ -392,14 +382,13 @@ float calc_length_m(float weight_g, const String& material, float diameter_mm = 
     else if (material == "PC") density = 1.20;
     else if (material == "PLA+") density = 1.22;
     else if (material == "HIPS") density = 1.07;
-    float r = (diameter_mm / 2.0) / 10.0; // cm
+    float r = (diameter_mm / 2.0) / 10.0;
     float vol = weight_g / density;
     float len_cm = vol / (PI * r * r);
-    return len_cm / 100.0; // meters
+    return len_cm / 100.0;
 }
 
-// ─── UI GLOBALS ───────────────────────────────────────────────────────────────
-// Screens
+// ─── UI GLOBALS ──────────────────────────────────────────────────────────────
 lv_obj_t* scr_idle     = nullptr;
 lv_obj_t* scr_spool    = nullptr;
 lv_obj_t* scr_unknown  = nullptr;
@@ -407,7 +396,6 @@ lv_obj_t* scr_saving   = nullptr;
 lv_obj_t* scr_saved    = nullptr;
 lv_obj_t* scr_error    = nullptr;
 
-// Spool screen dynamic labels
 lv_obj_t* lbl_vendor      = nullptr;
 lv_obj_t* lbl_material    = nullptr;
 lv_obj_t* lbl_name        = nullptr;
@@ -417,23 +405,16 @@ lv_obj_t* lbl_weight_delta = nullptr;
 lv_obj_t* bar_filament    = nullptr;
 lv_obj_t* color_swatch    = nullptr;
 lv_obj_t* lbl_uid         = nullptr;
+lv_obj_t* wifi_dot_idle   = nullptr;
 
-// Toolhead buttons on spool screen
 lv_obj_t* btn_t[4]        = {};
 lv_obj_t* btn_storage     = nullptr;
 lv_obj_t* btn_save        = nullptr;
 
-// Unknown screen fields
-lv_obj_t* ta_vendor_unk   = nullptr;
-lv_obj_t* ta_name_unk     = nullptr;
-lv_obj_t* dd_material_unk = nullptr;
 lv_obj_t* lbl_uid_unk     = nullptr;
 lv_obj_t* lbl_weight_unk  = nullptr;
-
-// Saved screen labels
 lv_obj_t* lbl_saved_msg   = nullptr;
 
-// Styles
 static lv_style_t style_bg;
 static lv_style_t style_card;
 static lv_style_t style_btn_active;
@@ -445,14 +426,12 @@ static lv_style_t style_dim;
 
 // ─── STYLE SETUP ─────────────────────────────────────────────────────────────
 void setup_styles() {
-    // Background dark
     lv_style_init(&style_bg);
     lv_style_set_bg_color(&style_bg, lv_color_make(13, 13, 25));
     lv_style_set_bg_opa(&style_bg, LV_OPA_COVER);
     lv_style_set_border_width(&style_bg, 0);
     lv_style_set_pad_all(&style_bg, 0);
 
-    // Card
     lv_style_init(&style_card);
     lv_style_set_bg_color(&style_card, lv_color_make(20, 28, 50));
     lv_style_set_bg_opa(&style_card, LV_OPA_COVER);
@@ -461,7 +440,6 @@ void setup_styles() {
     lv_style_set_radius(&style_card, 8);
     lv_style_set_pad_all(&style_card, 12);
 
-    // Inactive toolhead button
     lv_style_init(&style_btn_inactive);
     lv_style_set_bg_color(&style_btn_inactive, lv_color_make(20, 28, 50));
     lv_style_set_bg_opa(&style_btn_inactive, LV_OPA_COVER);
@@ -470,7 +448,6 @@ void setup_styles() {
     lv_style_set_radius(&style_btn_inactive, 6);
     lv_style_set_text_color(&style_btn_inactive, lv_color_make(100, 140, 200));
 
-    // Active toolhead button
     lv_style_init(&style_btn_active);
     lv_style_set_bg_color(&style_btn_active, lv_color_make(0, 60, 100));
     lv_style_set_bg_opa(&style_btn_active, LV_OPA_COVER);
@@ -479,7 +456,6 @@ void setup_styles() {
     lv_style_set_radius(&style_btn_active, 6);
     lv_style_set_text_color(&style_btn_active, lv_color_make(0, 200, 255));
 
-    // Save button
     lv_style_init(&style_btn_save);
     lv_style_set_bg_color(&style_btn_save, lv_color_make(0, 80, 30));
     lv_style_set_bg_opa(&style_btn_save, LV_OPA_COVER);
@@ -488,44 +464,40 @@ void setup_styles() {
     lv_style_set_radius(&style_btn_save, 8);
     lv_style_set_text_color(&style_btn_save, lv_color_make(80, 255, 120));
 
-    // Title text
     lv_style_init(&style_title);
     lv_style_set_text_color(&style_title, lv_color_make(0, 200, 255));
     lv_style_set_text_font(&style_title, &lv_font_montserrat_14);
 
-    // Value text
     lv_style_init(&style_value);
     lv_style_set_text_color(&style_value, lv_color_make(220, 235, 255));
     lv_style_set_text_font(&style_value, &lv_font_montserrat_14);
 
-    // Dim text
     lv_style_init(&style_dim);
     lv_style_set_text_color(&style_dim, lv_color_make(80, 100, 140));
     lv_style_set_text_font(&style_dim, &lv_font_montserrat_12);
 }
 
-// ─── TOOLHEAD BUTTON CALLBACK ─────────────────────────────────────────────────
+// ─── WIFI DOT UPDATE ─────────────────────────────────────────────────────────
+void update_wifi_dot() {
+    if (wifi_dot_idle == nullptr) return;
+    lv_color_t col = g_wifi_ok ?
+        lv_color_make(0, 200, 80) :
+        lv_color_make(200, 40, 40);
+    lv_obj_set_style_bg_color(wifi_dot_idle, col, LV_PART_MAIN);
+}
+
+// ─── TOOLHEAD BUTTON CALLBACK ────────────────────────────────────────────────
 static void cb_toolhead(lv_event_t* e) {
     int ch = (int)(intptr_t)lv_event_get_user_data(e);
     g_selected_toolhead = ch;
-
-    // Update button visual states
-    const char* toolhead_labels[4] = {"T1", "T2", "T3", "T4"};
     for (int i = 0; i < 4; i++) {
         lv_obj_remove_style(btn_t[i], nullptr, LV_PART_MAIN);
-        if (i == ch - 1) {
-            lv_obj_add_style(btn_t[i], &style_btn_active, LV_PART_MAIN);
-        } else {
-            lv_obj_add_style(btn_t[i], &style_btn_inactive, LV_PART_MAIN);
-        }
+        if (i == ch - 1) lv_obj_add_style(btn_t[i], &style_btn_active, LV_PART_MAIN);
+        else              lv_obj_add_style(btn_t[i], &style_btn_inactive, LV_PART_MAIN);
     }
-    // Storage button
     lv_obj_remove_style(btn_storage, nullptr, LV_PART_MAIN);
-    if (ch == 0) {
-        lv_obj_add_style(btn_storage, &style_btn_active, LV_PART_MAIN);
-    } else {
-        lv_obj_add_style(btn_storage, &style_btn_inactive, LV_PART_MAIN);
-    }
+    if (ch == 0) lv_obj_add_style(btn_storage, &style_btn_active, LV_PART_MAIN);
+    else         lv_obj_add_style(btn_storage, &style_btn_inactive, LV_PART_MAIN);
 }
 
 // ─── SAVE BUTTON CALLBACK ────────────────────────────────────────────────────
@@ -536,14 +508,14 @@ static void cb_save(lv_event_t* e) {
     lv_scr_load(scr_saving);
 }
 
-// ─── BUILD IDLE SCREEN ───────────────────────────────────────────────────────
+// ─── BUILD IDLE SCREEN (480x320 landscape) ───────────────────────────────────
 void build_screen_idle() {
     scr_idle = lv_obj_create(nullptr);
     lv_obj_add_style(scr_idle, &style_bg, LV_PART_MAIN);
 
-    // Header bar
+    // Header bar — full width, 44px tall
     lv_obj_t* hdr = lv_obj_create(scr_idle);
-    lv_obj_set_size(hdr, 320, 48);
+    lv_obj_set_size(hdr, 480, 44);
     lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_style_bg_color(hdr, lv_color_make(0, 40, 80), LV_PART_MAIN);
     lv_obj_set_style_border_width(hdr, 0, LV_PART_MAIN);
@@ -551,47 +523,47 @@ void build_screen_idle() {
 
     lv_obj_t* lbl_title = lv_label_create(hdr);
     lv_label_set_text(lbl_title, "SPOOLSTATION");
-    lv_obj_add_style(lbl_title, &style_title, LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_title, &lv_font_montserrat_16, LV_PART_MAIN);
     lv_obj_set_style_text_color(lbl_title, lv_color_make(0, 200, 255), LV_PART_MAIN);
     lv_obj_align(lbl_title, LV_ALIGN_LEFT_MID, 16, 0);
 
-    // WiFi status dot
-    lv_obj_t* wifi_dot = lv_obj_create(hdr);
-    lv_obj_set_size(wifi_dot, 10, 10);
-    lv_obj_set_style_radius(wifi_dot, 5, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(wifi_dot, lv_color_make(0, 200, 80), LV_PART_MAIN);
-    lv_obj_set_style_border_width(wifi_dot, 0, LV_PART_MAIN);
-    lv_obj_align(wifi_dot, LV_ALIGN_RIGHT_MID, -12, 0);
+    // WiFi dot — reflects actual connection state
+    wifi_dot_idle = lv_obj_create(hdr);
+    lv_obj_set_size(wifi_dot_idle, 10, 10);
+    lv_obj_set_style_radius(wifi_dot_idle, 5, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(wifi_dot_idle, lv_color_make(200, 40, 40), LV_PART_MAIN);
+    lv_obj_set_style_border_width(wifi_dot_idle, 0, LV_PART_MAIN);
+    lv_obj_align(wifi_dot_idle, LV_ALIGN_RIGHT_MID, -16, 0);
 
-    // Idle message
+    // Centered idle content
     lv_obj_t* icon = lv_label_create(scr_idle);
     lv_label_set_text(icon, LV_SYMBOL_UPLOAD);
     lv_obj_set_style_text_font(icon, &lv_font_montserrat_48, LV_PART_MAIN);
     lv_obj_set_style_text_color(icon, lv_color_make(30, 50, 90), LV_PART_MAIN);
-    lv_obj_align(icon, LV_ALIGN_CENTER, 0, -40);
+    lv_obj_align(icon, LV_ALIGN_CENTER, 0, -20);
 
     lv_obj_t* lbl_hang = lv_label_create(scr_idle);
     lv_label_set_text(lbl_hang, "Hang spool to begin");
     lv_obj_set_style_text_color(lbl_hang, lv_color_make(60, 90, 140), LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_hang, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_align(lbl_hang, LV_ALIGN_CENTER, 0, 20);
+    lv_obj_align(lbl_hang, LV_ALIGN_CENTER, 0, 36);
 
     lv_obj_t* lbl_sub = lv_label_create(scr_idle);
     lv_label_set_text(lbl_sub, "NFC tag will be read automatically");
     lv_obj_set_style_text_color(lbl_sub, lv_color_make(40, 60, 100), LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_sub, &lv_font_montserrat_12, LV_PART_MAIN);
-    lv_obj_align(lbl_sub, LV_ALIGN_CENTER, 0, 44);
+    lv_obj_align(lbl_sub, LV_ALIGN_CENTER, 0, 58);
 }
 
-// ─── BUILD SPOOL SCREEN ───────────────────────────────────────────────────────
+// ─── BUILD SPOOL SCREEN (480x320 landscape) ──────────────────────────────────
+// Layout: left column = swatch + info, right column = weight + bar + toolhead buttons + save
 void build_screen_spool() {
     scr_spool = lv_obj_create(nullptr);
     lv_obj_add_style(scr_spool, &style_bg, LV_PART_MAIN);
 
     // Header
     lv_obj_t* hdr = lv_obj_create(scr_spool);
-    lv_obj_set_size(hdr, 320, 44);
+    lv_obj_set_size(hdr, 480, 40);
     lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_style_bg_color(hdr, lv_color_make(0, 40, 80), LV_PART_MAIN);
     lv_obj_set_style_border_width(hdr, 0, LV_PART_MAIN);
@@ -603,112 +575,107 @@ void build_screen_spool() {
     lv_obj_set_style_text_font(lbl_hdr, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_align(lbl_hdr, LV_ALIGN_LEFT_MID, 12, 0);
 
-    // Color swatch box
+    // ── LEFT COLUMN (x: 12..220) ──
+    // Color swatch
     color_swatch = lv_obj_create(scr_spool);
-    lv_obj_set_size(color_swatch, 56, 56);
-    lv_obj_align(color_swatch, LV_ALIGN_TOP_LEFT, 12, 54);
-    lv_obj_set_style_radius(color_swatch, 28, LV_PART_MAIN);
+    lv_obj_set_size(color_swatch, 52, 52);
+    lv_obj_set_pos(color_swatch, 12, 48);
+    lv_obj_set_style_radius(color_swatch, 26, LV_PART_MAIN);
     lv_obj_set_style_border_color(color_swatch, lv_color_make(60, 80, 120), LV_PART_MAIN);
     lv_obj_set_style_border_width(color_swatch, 2, LV_PART_MAIN);
 
-    // Vendor label
+    // Vendor
     lbl_vendor = lv_label_create(scr_spool);
     lv_label_set_text(lbl_vendor, "---");
     lv_obj_set_style_text_color(lbl_vendor, lv_color_make(0, 180, 255), LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_vendor, &lv_font_montserrat_16, LV_PART_MAIN);
-    lv_obj_align(lbl_vendor, LV_ALIGN_TOP_LEFT, 82, 56);
+    lv_obj_set_pos(lbl_vendor, 74, 50);
 
-    // Material label
+    // Material
     lbl_material = lv_label_create(scr_spool);
     lv_label_set_text(lbl_material, "---");
     lv_obj_set_style_text_color(lbl_material, lv_color_make(140, 170, 220), LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_material, &lv_font_montserrat_12, LV_PART_MAIN);
-    lv_obj_align(lbl_material, LV_ALIGN_TOP_LEFT, 82, 78);
+    lv_obj_set_pos(lbl_material, 74, 72);
 
     // Color name
     lbl_name = lv_label_create(scr_spool);
     lv_label_set_text(lbl_name, "---");
     lv_obj_set_style_text_color(lbl_name, lv_color_make(180, 200, 240), LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_name, &lv_font_montserrat_12, LV_PART_MAIN);
-    lv_obj_align(lbl_name, LV_ALIGN_TOP_LEFT, 82, 94);
-
-    // Divider
-    lv_obj_t* div1 = lv_obj_create(scr_spool);
-    lv_obj_set_size(div1, 296, 1);
-    lv_obj_align(div1, LV_ALIGN_TOP_MID, 0, 120);
-    lv_obj_set_style_bg_color(div1, lv_color_make(30, 50, 90), LV_PART_MAIN);
-    lv_obj_set_style_border_width(div1, 0, LV_PART_MAIN);
-
-    // Weight display
-    lv_obj_t* lbl_w_title = lv_label_create(scr_spool);
-    lv_label_set_text(lbl_w_title, "REMAINING");
-    lv_obj_set_style_text_color(lbl_w_title, lv_color_make(60, 90, 140), LV_PART_MAIN);
-    lv_obj_set_style_text_font(lbl_w_title, &lv_font_montserrat_10, LV_PART_MAIN);
-    lv_obj_align(lbl_w_title, LV_ALIGN_TOP_LEFT, 12, 130);
-
-    lbl_weight = lv_label_create(scr_spool);
-    lv_label_set_text(lbl_weight, "---g");
-    lv_obj_set_style_text_color(lbl_weight, lv_color_make(0, 200, 255), LV_PART_MAIN);
-    lv_obj_set_style_text_font(lbl_weight, &lv_font_montserrat_22, LV_PART_MAIN);
-    lv_obj_align(lbl_weight, LV_ALIGN_TOP_LEFT, 12, 144);
-
-    lbl_length = lv_label_create(scr_spool);
-    lv_label_set_text(lbl_length, "~---m");
-    lv_obj_set_style_text_color(lbl_length, lv_color_make(100, 140, 200), LV_PART_MAIN);
-    lv_obj_set_style_text_font(lbl_length, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_align(lbl_length, LV_ALIGN_TOP_LEFT, 12, 172);
-
-    // Weight delta
-    lbl_weight_delta = lv_label_create(scr_spool);
-    lv_label_set_text(lbl_weight_delta, "");
-    lv_obj_set_style_text_color(lbl_weight_delta, lv_color_make(255, 160, 40), LV_PART_MAIN);
-    lv_obj_set_style_text_font(lbl_weight_delta, &lv_font_montserrat_12, LV_PART_MAIN);
-    lv_obj_align(lbl_weight_delta, LV_ALIGN_TOP_RIGHT, -12, 152);
-
-    // Filament bar
-    bar_filament = lv_bar_create(scr_spool);
-    lv_obj_set_size(bar_filament, 296, 8);
-    lv_obj_align(bar_filament, LV_ALIGN_TOP_MID, 0, 194);
-    lv_obj_set_style_bg_color(bar_filament, lv_color_make(20, 30, 55), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(bar_filament, lv_color_make(0, 180, 255), LV_PART_INDICATOR);
-    lv_bar_set_range(bar_filament, 0, 100);
-    lv_bar_set_value(bar_filament, 50, LV_ANIM_OFF);
-
-    // Temp display
-    lv_obj_t* lbl_t_title = lv_label_create(scr_spool);
-    lv_label_set_text(lbl_t_title, "NOZZLE");
-    lv_obj_set_style_text_color(lbl_t_title, lv_color_make(60, 90, 140), LV_PART_MAIN);
-    lv_obj_set_style_text_font(lbl_t_title, &lv_font_montserrat_10, LV_PART_MAIN);
-    lv_obj_align(lbl_t_title, LV_ALIGN_TOP_LEFT, 180, 130);
+    lv_obj_set_pos(lbl_name, 74, 88);
 
     // UID
     lbl_uid = lv_label_create(scr_spool);
     lv_label_set_text(lbl_uid, "UID: ---");
     lv_obj_set_style_text_color(lbl_uid, lv_color_make(40, 60, 100), LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_uid, &lv_font_montserrat_10, LV_PART_MAIN);
-    lv_obj_align(lbl_uid, LV_ALIGN_TOP_MID, 0, 208);
+    lv_obj_set_pos(lbl_uid, 12, 108);
 
-    // Divider 2
-    lv_obj_t* div2 = lv_obj_create(scr_spool);
-    lv_obj_set_size(div2, 296, 1);
-    lv_obj_align(div2, LV_ALIGN_TOP_MID, 0, 226);
-    lv_obj_set_style_bg_color(div2, lv_color_make(30, 50, 90), LV_PART_MAIN);
-    lv_obj_set_style_border_width(div2, 0, LV_PART_MAIN);
+    // Vertical divider between columns
+    lv_obj_t* vdiv = lv_obj_create(scr_spool);
+    lv_obj_set_size(vdiv, 1, 268);
+    lv_obj_set_pos(vdiv, 228, 44);
+    lv_obj_set_style_bg_color(vdiv, lv_color_make(30, 50, 90), LV_PART_MAIN);
+    lv_obj_set_style_border_width(vdiv, 0, LV_PART_MAIN);
 
-    // Toolhead assignment label
+    // ── RIGHT COLUMN (x: 238..468) ──
+    // Weight label
+    lv_obj_t* lbl_w_title = lv_label_create(scr_spool);
+    lv_label_set_text(lbl_w_title, "REMAINING");
+    lv_obj_set_style_text_color(lbl_w_title, lv_color_make(60, 90, 140), LV_PART_MAIN);
+    lv_obj_set_style_text_font(lbl_w_title, &lv_font_montserrat_10, LV_PART_MAIN);
+    lv_obj_set_pos(lbl_w_title, 238, 50);
+
+    lbl_weight = lv_label_create(scr_spool);
+    lv_label_set_text(lbl_weight, "---g");
+    lv_obj_set_style_text_color(lbl_weight, lv_color_make(0, 200, 255), LV_PART_MAIN);
+    lv_obj_set_style_text_font(lbl_weight, &lv_font_montserrat_22, LV_PART_MAIN);
+    lv_obj_set_pos(lbl_weight, 238, 63);
+
+    lbl_length = lv_label_create(scr_spool);
+    lv_label_set_text(lbl_length, "~---m");
+    lv_obj_set_style_text_color(lbl_length, lv_color_make(100, 140, 200), LV_PART_MAIN);
+    lv_obj_set_style_text_font(lbl_length, &lv_font_montserrat_12, LV_PART_MAIN);
+    lv_obj_set_pos(lbl_length, 238, 90);
+
+    // Weight delta
+    lbl_weight_delta = lv_label_create(scr_spool);
+    lv_label_set_text(lbl_weight_delta, "");
+    lv_obj_set_style_text_color(lbl_weight_delta, lv_color_make(255, 160, 40), LV_PART_MAIN);
+    lv_obj_set_style_text_font(lbl_weight_delta, &lv_font_montserrat_12, LV_PART_MAIN);
+    lv_obj_set_pos(lbl_weight_delta, 380, 70);
+
+    // Filament progress bar
+    bar_filament = lv_bar_create(scr_spool);
+    lv_obj_set_size(bar_filament, 228, 8);
+    lv_obj_set_pos(bar_filament, 238, 108);
+    lv_obj_set_style_bg_color(bar_filament, lv_color_make(20, 30, 55), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(bar_filament, lv_color_make(0, 180, 255), LV_PART_INDICATOR);
+    lv_bar_set_range(bar_filament, 0, 100);
+    lv_bar_set_value(bar_filament, 50, LV_ANIM_OFF);
+
+    // Horizontal divider above toolhead buttons
+    lv_obj_t* hdiv = lv_obj_create(scr_spool);
+    lv_obj_set_size(hdiv, 228, 1);
+    lv_obj_set_pos(hdiv, 238, 124);
+    lv_obj_set_style_bg_color(hdiv, lv_color_make(30, 50, 90), LV_PART_MAIN);
+    lv_obj_set_style_border_width(hdiv, 0, LV_PART_MAIN);
+
+    // Toolhead label
     lv_obj_t* lbl_assign = lv_label_create(scr_spool);
     lv_label_set_text(lbl_assign, "ASSIGN TO:");
     lv_obj_set_style_text_color(lbl_assign, lv_color_make(60, 90, 140), LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_assign, &lv_font_montserrat_10, LV_PART_MAIN);
-    lv_obj_align(lbl_assign, LV_ALIGN_TOP_LEFT, 12, 236);
+    lv_obj_set_pos(lbl_assign, 238, 130);
 
-    // Toolhead buttons T1-T4
+    // T1-T4 buttons
     const char* t_labels[4] = {"T1", "T2", "T3", "T4"};
-    int btn_w = 60, btn_h = 42;
+    int btn_w = 40, btn_h = 36;
     for (int i = 0; i < 4; i++) {
         btn_t[i] = lv_btn_create(scr_spool);
         lv_obj_set_size(btn_t[i], btn_w, btn_h);
-        lv_obj_align(btn_t[i], LV_ALIGN_TOP_LEFT, 12 + i * (btn_w + 6), 252);
+        lv_obj_set_pos(btn_t[i], 238 + i * (btn_w + 5), 146);
         lv_obj_add_style(btn_t[i], &style_btn_inactive, LV_PART_MAIN);
         lv_obj_set_style_shadow_width(btn_t[i], 0, LV_PART_MAIN);
         lv_obj_add_event_cb(btn_t[i], cb_toolhead, LV_EVENT_CLICKED, (void*)(intptr_t)(i + 1));
@@ -719,19 +686,19 @@ void build_screen_spool() {
 
     // Storage button
     btn_storage = lv_btn_create(scr_spool);
-    lv_obj_set_size(btn_storage, 80, 42);
-    lv_obj_align(btn_storage, LV_ALIGN_TOP_RIGHT, -12, 252);
+    lv_obj_set_size(btn_storage, 55, 36);
+    lv_obj_set_pos(btn_storage, 411, 146);
     lv_obj_add_style(btn_storage, &style_btn_active, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(btn_storage, 0, LV_PART_MAIN);
     lv_obj_add_event_cb(btn_storage, cb_toolhead, LV_EVENT_CLICKED, (void*)(intptr_t)0);
     lv_obj_t* lbl_stor = lv_label_create(btn_storage);
-    lv_label_set_text(lbl_stor, "Storage");
+    lv_label_set_text(lbl_stor, "Stor");
     lv_obj_center(lbl_stor);
 
-    // Save button
+    // Save button — full width of right column, pinned to bottom
     btn_save = lv_btn_create(scr_spool);
-    lv_obj_set_size(btn_save, 296, 50);
-    lv_obj_align(btn_save, LV_ALIGN_BOTTOM_MID, 0, -12);
+    lv_obj_set_size(btn_save, 228, 48);
+    lv_obj_set_pos(btn_save, 238, 264);
     lv_obj_add_style(btn_save, &style_btn_save, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(btn_save, 0, LV_PART_MAIN);
     lv_obj_add_event_cb(btn_save, cb_save, LV_EVENT_CLICKED, nullptr);
@@ -754,7 +721,7 @@ void build_screen_saving() {
     lv_obj_t* lbl = lv_label_create(scr_saving);
     lv_label_set_text(lbl, "Saving to Spoolman...");
     lv_obj_set_style_text_color(lbl, lv_color_make(0, 180, 255), LV_PART_MAIN);
-    lv_obj_align(lbl, LV_ALIGN_CENTER, 0, 40);
+    lv_obj_align(lbl, LV_ALIGN_CENTER, 0, 36);
 }
 
 // ─── BUILD SAVED SCREEN ──────────────────────────────────────────────────────
@@ -766,13 +733,15 @@ void build_screen_saved() {
     lv_label_set_text(icon, LV_SYMBOL_OK);
     lv_obj_set_style_text_font(icon, &lv_font_montserrat_48, LV_PART_MAIN);
     lv_obj_set_style_text_color(icon, lv_color_make(0, 200, 80), LV_PART_MAIN);
-    lv_obj_align(icon, LV_ALIGN_CENTER, 0, -40);
+    lv_obj_align(icon, LV_ALIGN_CENTER, 0, -30);
 
     lbl_saved_msg = lv_label_create(scr_saved);
     lv_label_set_text(lbl_saved_msg, "Saved");
+    lv_label_set_long_mode(lbl_saved_msg, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(lbl_saved_msg, 440);
     lv_obj_set_style_text_color(lbl_saved_msg, lv_color_make(0, 200, 80), LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_saved_msg, &lv_font_montserrat_16, LV_PART_MAIN);
-    lv_obj_align(lbl_saved_msg, LV_ALIGN_CENTER, 0, 20);
+    lv_obj_align(lbl_saved_msg, LV_ALIGN_CENTER, 0, 24);
 }
 
 // ─── BUILD UNKNOWN TAG SCREEN ────────────────────────────────────────────────
@@ -781,7 +750,7 @@ void build_screen_unknown() {
     lv_obj_add_style(scr_unknown, &style_bg, LV_PART_MAIN);
 
     lv_obj_t* hdr = lv_obj_create(scr_unknown);
-    lv_obj_set_size(hdr, 320, 44);
+    lv_obj_set_size(hdr, 480, 40);
     lv_obj_align(hdr, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_style_bg_color(hdr, lv_color_make(80, 40, 0), LV_PART_MAIN);
     lv_obj_set_style_border_width(hdr, 0, LV_PART_MAIN);
@@ -793,33 +762,29 @@ void build_screen_unknown() {
     lv_obj_set_style_text_font(lbl_hdr, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_align(lbl_hdr, LV_ALIGN_LEFT_MID, 12, 0);
 
-    // UID display
     lbl_uid_unk = lv_label_create(scr_unknown);
     lv_label_set_text(lbl_uid_unk, "UID: ---");
     lv_obj_set_style_text_color(lbl_uid_unk, lv_color_make(255, 160, 40), LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_uid_unk, &lv_font_montserrat_10, LV_PART_MAIN);
-    lv_obj_align(lbl_uid_unk, LV_ALIGN_TOP_LEFT, 12, 54);
+    lv_obj_set_pos(lbl_uid_unk, 12, 50);
 
-    // Weight
     lbl_weight_unk = lv_label_create(scr_unknown);
     lv_label_set_text(lbl_weight_unk, "Weight: ---g");
     lv_obj_set_style_text_color(lbl_weight_unk, lv_color_make(0, 200, 255), LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_weight_unk, &lv_font_montserrat_14, LV_PART_MAIN);
-    lv_obj_align(lbl_weight_unk, LV_ALIGN_TOP_LEFT, 12, 70);
+    lv_obj_set_pos(lbl_weight_unk, 12, 66);
 
-    // Instruction
     lv_obj_t* lbl_inst = lv_label_create(scr_unknown);
     lv_label_set_text(lbl_inst, "Open dashboard to register this spool.\nUID and weight have been sent to bridge.");
     lv_label_set_long_mode(lbl_inst, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(lbl_inst, 296);
+    lv_obj_set_width(lbl_inst, 456);
     lv_obj_set_style_text_color(lbl_inst, lv_color_make(140, 160, 200), LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl_inst, &lv_font_montserrat_12, LV_PART_MAIN);
-    lv_obj_align(lbl_inst, LV_ALIGN_TOP_MID, 0, 96);
+    lv_obj_set_pos(lbl_inst, 12, 100);
 
-    // Dismiss button
     lv_obj_t* btn_dismiss = lv_btn_create(scr_unknown);
     lv_obj_set_size(btn_dismiss, 200, 44);
-    lv_obj_align(btn_dismiss, LV_ALIGN_BOTTOM_MID, 0, -20);
+    lv_obj_align(btn_dismiss, LV_ALIGN_BOTTOM_MID, 0, -16);
     lv_obj_set_style_bg_color(btn_dismiss, lv_color_make(40, 30, 0), LV_PART_MAIN);
     lv_obj_set_style_border_color(btn_dismiss, lv_color_make(200, 120, 0), LV_PART_MAIN);
     lv_obj_set_style_border_width(btn_dismiss, 1, LV_PART_MAIN);
@@ -835,15 +800,15 @@ void build_screen_unknown() {
     lv_obj_center(lbl_d);
 }
 
-// ─── BUILD ERROR SCREEN ───────────────────────────────────────────────────────
+// ─── BUILD ERROR SCREEN ──────────────────────────────────────────────────────
 void build_screen_error() {
     scr_error = lv_obj_create(nullptr);
     lv_obj_add_style(scr_error, &style_bg, LV_PART_MAIN);
 
     lv_obj_t* lbl = lv_label_create(scr_error);
-    lv_label_set_text(lbl, LV_SYMBOL_WARNING " WiFi / Spoolman\nnot reachable");
+    lv_label_set_text(lbl, LV_SYMBOL_WARNING " WiFi / Spoolman not reachable");
     lv_label_set_long_mode(lbl, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(lbl, 280);
+    lv_obj_set_width(lbl, 440);
     lv_obj_set_style_text_color(lbl, lv_color_make(255, 80, 80), LV_PART_MAIN);
     lv_obj_set_style_text_font(lbl, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_align(lbl, LV_ALIGN_CENTER, 0, 0);
@@ -851,10 +816,7 @@ void build_screen_error() {
 
 // ─── UPDATE SPOOL SCREEN ─────────────────────────────────────────────────────
 void update_spool_screen(const SpoolData& s, float new_weight, float old_weight) {
-    // Color swatch
     lv_obj_set_style_bg_color(color_swatch, hex_to_lv_color(s.color_hex), LV_PART_MAIN);
-
-    // Labels
     lv_label_set_text(lbl_vendor,   s.vendor.c_str());
     lv_label_set_text(lbl_material, s.material.c_str());
     lv_label_set_text(lbl_name,     s.name.c_str());
@@ -867,7 +829,6 @@ void update_spool_screen(const SpoolData& s, float new_weight, float old_weight)
     snprintf(buf, sizeof(buf), "~%dm", (int)len);
     lv_label_set_text(lbl_length, buf);
 
-    // Delta
     float delta = new_weight - old_weight;
     if (abs(delta) > 2) {
         snprintf(buf, sizeof(buf), "%+.0fg", delta);
@@ -876,7 +837,6 @@ void update_spool_screen(const SpoolData& s, float new_weight, float old_weight)
         lv_label_set_text(lbl_weight_delta, "");
     }
 
-    // Progress bar — rough total 1000g assumed if we don't know
     int total = max(1000, (int)new_weight + s.tare_weight);
     int pct = (int)((new_weight / (float)(total - s.tare_weight)) * 100.0);
     pct = max(0, min(100, pct));
@@ -887,11 +847,9 @@ void update_spool_screen(const SpoolData& s, float new_weight, float old_weight)
                    hex_to_lv_color(s.color_hex),
         LV_PART_INDICATOR);
 
-    // UID
-    String uid_short = s.tag_uid.length() > 17 ? s.tag_uid.substring(0, 17) + "..." : s.tag_uid;
+    String uid_short = s.tag_uid.length() > 20 ? s.tag_uid.substring(0, 20) + "..." : s.tag_uid;
     lv_label_set_text(lbl_uid, ("UID: " + uid_short).c_str());
 
-    // Set storage as default selection
     g_selected_toolhead = 0;
     for (int i = 0; i < 4; i++) lv_obj_add_style(btn_t[i], &style_btn_inactive, LV_PART_MAIN);
     lv_obj_add_style(btn_storage, &style_btn_active, LV_PART_MAIN);
@@ -902,11 +860,10 @@ void do_save() {
     float remaining = g_weight_g - g_spool.tare_weight;
     if (remaining < 0) remaining = 0;
     float len = calc_length_m(remaining, g_spool.material);
-    int   ch  = g_selected_toolhead; // 0=storage, 1-4=T1-T4
+    int   ch  = g_selected_toolhead;
 
     bool ok = update_spool_weight(g_spool.id, remaining, len, ch > 0 ? ch - 1 : -1);
 
-    // Push to U1 if toolhead assigned
     if (ok && ch > 0) {
         push_to_u1(g_spool, ch - 1);
     }
@@ -925,9 +882,6 @@ void do_save() {
     g_saving = false;
     g_state  = StationState::SAVED;
     lv_scr_load(scr_saved);
-
-    // Auto-return to idle after 3 seconds
-    // (handled in main loop via timer)
 }
 
 // ─── SETUP ───────────────────────────────────────────────────────────────────
@@ -935,26 +889,16 @@ void setup() {
     Serial.begin(115200);
     Serial.println("SpoolStation booting...");
 
-    // Backlight on
-    Serial.println("Backlight...");
     pinMode(TFT_BL_PIN, OUTPUT);
     digitalWrite(TFT_BL_PIN, HIGH);
 
-    // Display init
-    Serial.println("TFT begin...");
     tft.begin();
-    Serial.println("TFT rotation...");
-    tft.setRotation(0);
-    Serial.println("TFT fill...");
+    tft.setRotation(1);  // Landscape
     tft.fillScreen(TFT_BLACK);
-    Serial.println("Display done.");
 
-    // LVGL init
-    Serial.println("LVGL init...");
     lv_init();
-    Serial.println("LVGL buf init...");
     lv_disp_draw_buf_init(&draw_buf, buf, nullptr, LV_BUF_SIZE);
-    Serial.println("LVGL disp drv...");
+
     static lv_disp_drv_t disp_drv;
     lv_disp_drv_init(&disp_drv);
     disp_drv.hor_res   = SCREEN_W;
@@ -962,47 +906,27 @@ void setup() {
     disp_drv.flush_cb  = lv_disp_flush;
     disp_drv.draw_buf  = &draw_buf;
     lv_disp_drv_register(&disp_drv);
-    Serial.println("LVGL done.");
 
-    // Touch init
-    Serial.println("Touch init...");
     gt911_init();
-    Serial.println("Touch drv...");
     static lv_indev_drv_t indev_drv;
     lv_indev_drv_init(&indev_drv);
     indev_drv.type     = LV_INDEV_TYPE_POINTER;
     indev_drv.read_cb  = lv_touch_read;
     lv_indev_drv_register(&indev_drv);
-    Serial.println("Touch done.");
 
-    // Build UI
-    Serial.println("Building UI...");
     setup_styles();
-    Serial.println("Styles done.");
     build_screen_idle();
-    Serial.println("Idle screen done.");
     build_screen_spool();
-    Serial.println("Spool screen done.");
     build_screen_saving();
-    Serial.println("Saving screen done.");
     build_screen_saved();
-    Serial.println("Saved screen done.");
     build_screen_unknown();
-    Serial.println("Unknown screen done.");
     build_screen_error();
-    Serial.println("Error screen done.");
     lv_scr_load(scr_idle);
-    Serial.println("UI done.");
 
-    // HX711
-    Serial.println("HX711 init...");
     scale.begin(HX711_DT_PIN, HX711_SCK_PIN);
     scale.set_scale(CALIBRATION_FACTOR);
-    //scale.tare(); // commented out until hx711 is wired
-    Serial.println("HX711 ready.");
+    // scale.tare(); // uncomment after HX711 is wired
 
-    // PN532 on UART2
-    Serial.println("PN532 init...");
     pn532Serial.begin(115200, SERIAL_8N1, PN532_RX_PIN, PN532_TX_PIN);
     nfc.begin();
     uint32_t fw = nfc.getFirmwareVersion();
@@ -1013,9 +937,7 @@ void setup() {
     } else {
         Serial.println("PN532 not found — check wiring and jumper (HSU mode)");
     }
-    Serial.println("PN532 done.");
 
-    // WiFi
     Serial.printf("Connecting to %s...\n", WIFI_SSID);
     WiFi.begin(WIFI_SSID, WIFI_PASS);
     int attempts = 0;
@@ -1026,11 +948,15 @@ void setup() {
     }
     if (WiFi.status() == WL_CONNECTED) {
         Serial.printf("WiFi OK: %s\n", WiFi.localIP().toString().c_str());
+        g_wifi_ok = true;
     } else {
         Serial.println("WiFi FAILED");
+        g_wifi_ok = false;
         g_state = StationState::WIFI_ERROR;
         lv_scr_load(scr_error);
     }
+
+    update_wifi_dot();
 }
 
 // ─── MAIN LOOP ───────────────────────────────────────────────────────────────
@@ -1039,7 +965,7 @@ unsigned long g_saved_ts = 0;
 void loop() {
     lv_timer_handler();
 
-    // ── Read HX711 ──
+    // Read HX711
     if (scale.is_ready()) {
         float raw = scale.get_units(1);
         if (raw < 0) raw = 0;
@@ -1050,7 +976,7 @@ void loop() {
         g_weight_stable = is_weight_stable();
     }
 
-    // ── Poll PN532 ──
+    // Poll PN532
     uint8_t uid[7];
     uint8_t uid_len;
     bool tag_found = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uid_len, 50);
@@ -1066,7 +992,6 @@ void loop() {
 
             if (g_state == StationState::IDLE || g_state == StationState::SAVED) {
                 g_state = StationState::TAG_READ;
-                // Look up spool in Spoolman
                 SpoolData found = find_spool_by_uid(uid_str);
                 if (found.valid) {
                     float old_weight = found.remaining_weight;
@@ -1077,11 +1002,9 @@ void loop() {
                     update_spool_screen(found, new_remaining, old_weight);
                     lv_scr_load(scr_spool);
                 } else {
-                    // Unknown tag — send to bridge for web dashboard registration
                     g_state = StationState::UNKNOWN_TAG;
                     if (lbl_uid_unk)    lv_label_set_text(lbl_uid_unk,    ("UID: " + uid_str).c_str());
                     if (lbl_weight_unk) lv_label_set_text(lbl_weight_unk, (String((int)g_weight_g) + "g on scale").c_str());
-                    // Post unknown tag event to bridge
                     DynamicJsonDocument doc(256);
                     doc["event"]     = "unknown_tag";
                     doc["uid"]       = uid_str;
@@ -1094,7 +1017,6 @@ void loop() {
             }
         }
     } else {
-        // Tag removed
         if (g_last_uid != "" && millis() - g_last_tag_ms > 2000) {
             g_last_uid = "";
             if (g_state == StationState::SPOOL_FOUND ||
@@ -1106,12 +1028,12 @@ void loop() {
         }
     }
 
-    // ── Handle save ──
+    // Handle save
     if (g_state == StationState::SAVING && g_saving) {
         do_save();
     }
 
-    // ── Auto-return from saved screen after 3s ──
+    // Auto-return from saved screen after 3s
     if (g_state == StationState::SAVED) {
         if (g_saved_ts == 0) g_saved_ts = millis();
         if (millis() - g_saved_ts > 3000) {
