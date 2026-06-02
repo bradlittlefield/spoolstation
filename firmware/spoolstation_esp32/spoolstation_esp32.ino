@@ -105,19 +105,12 @@ float CALIBRATION_FACTOR = -96650.0;
 // ─── PIN DEFINITIONS ─────────────────────────────────────────────────────────
 #define HX711_SCK_PIN  18
 #define HX711_DT_PIN   19
-
-// PN532 on UART2 via Header B
-// GPIO35 is input-only — ideal for RX. GPIO22 is TX.
-// Serial Monitor on UART0 (GPIO1/3) remains fully functional.
-#define PN532_RX_PIN   35   // Header B IO35 — PN532 TXD connects here
-#define PN532_TX_PIN   22   // Header B IO22 — PN532 RXD connects here
-
-// Touch GT911 I2C
+#define PN532_RX_PIN   35
+#define PN532_TX_PIN   22
 #define GT911_SDA_PIN  33
 #define GT911_SCL_PIN  32
 #define GT911_IRQ_PIN  21
 #define GT911_RST_PIN  25
-
 #define TFT_BL_PIN     27
 
 // ─── DISPLAY / LVGL ──────────────────────────────────────────────────────────
@@ -129,11 +122,16 @@ TFT_eSPI tft = TFT_eSPI();
 static lv_disp_draw_buf_t draw_buf;
 static lv_color_t         buf[LV_BUF_SIZE];
 
+// ─── BOOT SCREEN COLORS (orange theme from logo) ─────────────────────────────
+#define COL_ORANGE      lv_color_make(255, 120,  20)
+#define COL_ORANGE_DIM  lv_color_make(140,  60,   0)
+#define COL_ORANGE_GLOW lv_color_make(255, 160,  60)
+#define COL_BG          lv_color_make(  8,   8,  12)
+#define COL_TRACK       lv_color_make( 30,  20,  10)
+#define COL_WHITE       lv_color_make(220, 220, 240)
+#define COL_GREY        lv_color_make( 80,  70,  60)
+
 // ─── TOUCH GT911 ─────────────────────────────────────────────────────────────
-// GT911 native resolution is portrait (480 tall x 320 wide internally mapped to
-// the physical 320x480 panel). For landscape rotation=1:
-//   screen_x = raw_y
-//   screen_y = GT911_MAX_X - raw_x
 #define GT911_ADDR      0x5D
 #define GT911_COORD_REG 0x814E
 #define GT911_MAX_X     479
@@ -163,15 +161,13 @@ TouchPoint gt911_read() {
         if (status & 0x80) {
             tp.pressed = (status & 0x0F) > 0;
             if (tp.pressed) {
-                Wire.read(); // track id
+                Wire.read();
                 uint8_t xl = Wire.read(); uint8_t xh = Wire.read();
                 uint8_t yl = Wire.read(); uint8_t yh = Wire.read();
                 int16_t raw_x = (xh << 8) | xl;
                 int16_t raw_y = (yh << 8) | yl;
-                // Remap portrait GT911 coords to landscape screen coords
                 tp.x = raw_y;
                 tp.y = GT911_MAX_X - raw_x;
-                // Clear status register
                 Wire.beginTransmission(GT911_ADDR);
                 Wire.write(GT911_COORD_REG >> 8);
                 Wire.write(GT911_COORD_REG & 0xFF);
@@ -185,20 +181,13 @@ TouchPoint gt911_read() {
 
 // ─── HARDWARE INSTANCES ──────────────────────────────────────────────────────
 HX711          scale;
-HardwareSerial pn532Serial(2);   // UART2 — GPIO35(RX)/GPIO22(TX)
+HardwareSerial pn532Serial(2);
 Adafruit_PN532 nfc(pn532Serial);
 
 // ─── STATE ───────────────────────────────────────────────────────────────────
 enum class StationState {
-    IDLE,
-    TAG_READ,
-    SPOOL_FOUND,
-    UNKNOWN_TAG,
-    WEIGHING,
-    SAVING,
-    SAVED,
-    WIFI_ERROR,
-    NO_TAG_WEIGHT
+    IDLE, TAG_READ, SPOOL_FOUND, UNKNOWN_TAG,
+    WEIGHING, SAVING, SAVED, WIFI_ERROR, NO_TAG_WEIGHT
 };
 
 StationState  g_state             = StationState::IDLE;
@@ -229,7 +218,6 @@ void lv_disp_flush(lv_disp_drv_t* disp, const lv_area_t* area, lv_color_t* color
     lv_disp_flush_ready(disp);
 }
 
-// ─── LVGL TOUCH READ ─────────────────────────────────────────────────────────
 void lv_touch_read(lv_indev_drv_t* drv, lv_indev_data_t* data) {
     TouchPoint tp = gt911_read();
     if (tp.pressed) {
@@ -243,8 +231,7 @@ void lv_touch_read(lv_indev_drv_t* drv, lv_indev_data_t* data) {
 
 // ─── COLOR UTILITIES ─────────────────────────────────────────────────────────
 lv_color_t hex_to_lv_color(const String& hex) {
-    String h = hex;
-    h.replace("#", "");
+    String h = hex; h.replace("#", "");
     if (h.length() < 6) return lv_color_white();
     long c = strtol(h.c_str(), nullptr, 16);
     return lv_color_make((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF);
@@ -269,7 +256,6 @@ float get_avg_weight() {
     return sum / count;
 }
 
-// ─── UID FORMATTING ──────────────────────────────────────────────────────────
 String format_uid(uint8_t* uid, uint8_t len) {
     String s = "";
     for (uint8_t i = 0; i < len; i++) {
@@ -283,54 +269,40 @@ String format_uid(uint8_t* uid, uint8_t len) {
 
 // ─── HTTP HELPERS ────────────────────────────────────────────────────────────
 String http_get(const String& url) {
-    HTTPClient http;
-    http.begin(url);
-    http.setTimeout(5000);
+    HTTPClient http; http.begin(url); http.setTimeout(5000);
     int code = http.GET();
-    String body = "";
-    if (code == 200) body = http.getString();
-    http.end();
-    return body;
+    String body = (code == 200) ? http.getString() : "";
+    http.end(); return body;
 }
 
 bool http_patch(const String& url, const String& json) {
-    HTTPClient http;
-    http.begin(url);
-    http.addHeader("Content-Type", "application/json");
-    http.setTimeout(5000);
-    int code = http.PATCH(json);
-    http.end();
+    HTTPClient http; http.begin(url);
+    http.addHeader("Content-Type", "application/json"); http.setTimeout(5000);
+    int code = http.PATCH(json); http.end();
     return (code >= 200 && code < 300);
 }
 
 bool http_post(const String& url, const String& json) {
-    HTTPClient http;
-    http.begin(url);
-    http.addHeader("Content-Type", "application/json");
-    http.setTimeout(5000);
-    int code = http.POST(json);
-    http.end();
+    HTTPClient http; http.begin(url);
+    http.addHeader("Content-Type", "application/json"); http.setTimeout(5000);
+    int code = http.POST(json); http.end();
     return (code >= 200 && code < 300);
 }
 
 // ─── SPOOLMAN API ────────────────────────────────────────────────────────────
 SpoolData find_spool_by_uid(const String& uid) {
-    SpoolData s = {};
-    s.valid = false;
+    SpoolData s = {}; s.valid = false;
     String body = http_get(String(SPOOLMAN_URL) + "/spool?allow_archived=false");
     if (body.length() == 0) return s;
-
     DynamicJsonDocument doc(32768);
     if (deserializeJson(doc, body) != DeserializationError::Ok) return s;
-
     JsonArray spools = doc.as<JsonArray>();
     for (JsonObject sp : spools) {
         String stored_uid = "";
         if (sp["extra"].containsKey("nfc_uid"))
             stored_uid = sp["extra"]["nfc_uid"].as<String>();
         stored_uid.toUpperCase();
-        String search_uid = uid;
-        search_uid.toUpperCase();
+        String search_uid = uid; search_uid.toUpperCase();
         if (stored_uid == search_uid) {
             s.valid              = true;
             s.id                 = sp["id"];
@@ -365,14 +337,12 @@ bool update_spool_weight(int spool_id, float remaining_g, float remaining_length
     extra["last_weighed"] = "now";
     if (toolhead_ch >= 0) extra["toolhead_channel"] = toolhead_ch;
     else                  extra["toolhead_channel"]  = nullptr;
-    String json;
-    serializeJson(doc, json);
+    String json; serializeJson(doc, json);
     return http_patch(String(SPOOLMAN_URL) + "/spool/" + spool_id, json);
 }
 
 bool push_to_u1(const SpoolData& s, int channel) {
-    String c = s.color_hex;
-    c.replace("#", "");
+    String c = s.color_hex; c.replace("#", "");
     long rgb = strtol(c.c_str(), nullptr, 16);
     DynamicJsonDocument doc(512);
     doc["channel"] = channel;
@@ -385,12 +355,10 @@ bool push_to_u1(const SpoolData& s, int channel) {
     info["HOTEND_MIN_TEMP"] = s.min_temp;
     info["HOTEND_MAX_TEMP"] = s.max_temp;
     info["BED_TEMP"]        = s.bed_temp;
-    String json;
-    serializeJson(doc, json);
+    String json; serializeJson(doc, json);
     return http_post(String(BRIDGE_URL) + "/u1/toolhead/" + channel, json);
 }
 
-// ─── LENGTH CALCULATION ──────────────────────────────────────────────────────
 float calc_length_m(float weight_g, const String& material, float diameter_mm = 1.75) {
     float density = 1.24;
     if      (material == "PETG" || material == "PETG-CF") density = 1.27;
@@ -401,13 +369,14 @@ float calc_length_m(float weight_g, const String& material, float diameter_mm = 
     else if (material == "PC")    density = 1.20;
     else if (material == "PLA+")  density = 1.22;
     else if (material == "HIPS")  density = 1.07;
-    float r      = (diameter_mm / 2.0) / 10.0;
-    float vol    = weight_g / density;
+    float r = (diameter_mm / 2.0) / 10.0;
+    float vol = weight_g / density;
     float len_cm = vol / (PI * r * r);
     return len_cm / 100.0;
 }
 
 // ─── UI GLOBALS ──────────────────────────────────────────────────────────────
+lv_obj_t* scr_boot    = nullptr;
 lv_obj_t* scr_idle    = nullptr;
 lv_obj_t* scr_spool   = nullptr;
 lv_obj_t* scr_unknown = nullptr;
@@ -415,6 +384,10 @@ lv_obj_t* scr_saving  = nullptr;
 lv_obj_t* scr_saved   = nullptr;
 lv_obj_t* scr_error   = nullptr;
 lv_obj_t* scr_wifi    = nullptr;
+
+// Boot screen widgets — updated during boot
+lv_obj_t* boot_bar        = nullptr;
+lv_obj_t* boot_status_lbl = nullptr;
 
 lv_obj_t* lbl_vendor       = nullptr;
 lv_obj_t* lbl_material     = nullptr;
@@ -501,6 +474,129 @@ void setup_styles() {
     lv_style_set_text_font(&style_dim, &lv_font_montserrat_12);
 }
 
+// ─── BOOT SCREEN ─────────────────────────────────────────────────────────────
+// Layout matches the AI render: spool logo left, title right, bar + status bottom
+// Built entirely with LVGL primitives — no image file needed
+void build_screen_boot() {
+    scr_boot = lv_obj_create(nullptr);
+    lv_obj_set_style_bg_color(scr_boot, COL_BG, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(scr_boot, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(scr_boot, 0, LV_PART_MAIN);
+
+    // ── Spool logo (left side, centered vertically) ──
+    // Outer ring — dark metallic
+    lv_obj_t* ring_outer = lv_obj_create(scr_boot);
+    lv_obj_set_size(ring_outer, 140, 140);
+    lv_obj_set_pos(ring_outer, 28, 72);
+    lv_obj_set_style_radius(ring_outer, 70, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(ring_outer, lv_color_make(30, 28, 35), LV_PART_MAIN);
+    lv_obj_set_style_border_color(ring_outer, lv_color_make(60, 55, 70), LV_PART_MAIN);
+    lv_obj_set_style_border_width(ring_outer, 3, LV_PART_MAIN);
+    lv_obj_set_style_shadow_color(ring_outer, COL_ORANGE_DIM, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(ring_outer, 20, LV_PART_MAIN);
+
+    // Orange filament wound ring (arc approximated with thick border)
+    lv_obj_t* ring_orange = lv_obj_create(scr_boot);
+    lv_obj_set_size(ring_orange, 116, 116);
+    lv_obj_set_pos(ring_orange, 40, 84);
+    lv_obj_set_style_radius(ring_orange, 58, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(ring_orange, lv_color_make(18, 16, 22), LV_PART_MAIN);
+    lv_obj_set_style_border_color(ring_orange, COL_ORANGE, LV_PART_MAIN);
+    lv_obj_set_style_border_width(ring_orange, 14, LV_PART_MAIN);
+    lv_obj_set_style_shadow_color(ring_orange, COL_ORANGE, LV_PART_MAIN);
+    lv_obj_set_style_shadow_width(ring_orange, 12, LV_PART_MAIN);
+
+    // Inner ring — circuit board dark
+    lv_obj_t* ring_inner = lv_obj_create(scr_boot);
+    lv_obj_set_size(ring_inner, 72, 72);
+    lv_obj_set_pos(ring_inner, 62, 106);
+    lv_obj_set_style_radius(ring_inner, 36, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(ring_inner, lv_color_make(22, 30, 48), LV_PART_MAIN);
+    lv_obj_set_style_border_color(ring_inner, lv_color_make(40, 80, 130), LV_PART_MAIN);
+    lv_obj_set_style_border_width(ring_inner, 2, LV_PART_MAIN);
+
+    // Hub center
+    lv_obj_t* hub = lv_obj_create(scr_boot);
+    lv_obj_set_size(hub, 28, 28);
+    lv_obj_set_pos(hub, 84, 128);
+    lv_obj_set_style_radius(hub, 14, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(hub, lv_color_make(50, 55, 70), LV_PART_MAIN);
+    lv_obj_set_style_border_color(hub, lv_color_make(90, 100, 120), LV_PART_MAIN);
+    lv_obj_set_style_border_width(hub, 2, LV_PART_MAIN);
+
+    // Arrow / lightning bolt — orange label centered in inner ring
+    lv_obj_t* arrow = lv_label_create(scr_boot);
+    lv_label_set_text(arrow, LV_SYMBOL_CHARGE);
+    lv_obj_set_style_text_font(arrow, &lv_font_montserrat_22, LV_PART_MAIN);
+    lv_obj_set_style_text_color(arrow, COL_ORANGE_GLOW, LV_PART_MAIN);
+    lv_obj_set_pos(arrow, 86, 130);
+
+    // ── Right side: title block ──
+    // "Spool" in orange, "Station" in white — matching the logo style
+    lv_obj_t* lbl_spool = lv_label_create(scr_boot);
+    lv_label_set_text(lbl_spool, "Spool");
+    lv_obj_set_style_text_font(lbl_spool, &lv_font_montserrat_48, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_spool, COL_ORANGE, LV_PART_MAIN);
+    lv_obj_set_pos(lbl_spool, 184, 68);
+
+    lv_obj_t* lbl_station = lv_label_create(scr_boot);
+    lv_label_set_text(lbl_station, "Station");
+    lv_obj_set_style_text_font(lbl_station, &lv_font_montserrat_48, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_station, COL_WHITE, LV_PART_MAIN);
+    lv_obj_set_pos(lbl_station, 184, 118);
+
+    lv_obj_t* lbl_sub = lv_label_create(scr_boot);
+    lv_label_set_text(lbl_sub, "FILAMENT INVENTORY MANAGEMENT");
+    lv_obj_set_style_text_font(lbl_sub, &lv_font_montserrat_12, LV_PART_MAIN);
+    lv_obj_set_style_text_color(lbl_sub, COL_GREY, LV_PART_MAIN);
+    lv_obj_set_pos(lbl_sub, 184, 172);
+
+    // ── Bottom: loading bar + status ──
+    // Bar track
+    lv_obj_t* bar_track = lv_obj_create(scr_boot);
+    lv_obj_set_size(bar_track, 420, 14);
+    lv_obj_set_pos(bar_track, 30, 228);
+    lv_obj_set_style_radius(bar_track, 7, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(bar_track, COL_TRACK, LV_PART_MAIN);
+    lv_obj_set_style_border_color(bar_track, lv_color_make(60, 40, 10), LV_PART_MAIN);
+    lv_obj_set_style_border_width(bar_track, 1, LV_PART_MAIN);
+
+    // Actual LVGL bar over the track
+    boot_bar = lv_bar_create(scr_boot);
+    lv_obj_set_size(boot_bar, 420, 14);
+    lv_obj_set_pos(boot_bar, 30, 228);
+    lv_obj_set_style_radius(boot_bar, 7, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(boot_bar, COL_TRACK, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(boot_bar, COL_ORANGE, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(boot_bar, 7, LV_PART_INDICATOR);
+    lv_obj_set_style_shadow_color(boot_bar, COL_ORANGE, LV_PART_INDICATOR);
+    lv_obj_set_style_shadow_width(boot_bar, 8, LV_PART_INDICATOR);
+    lv_bar_set_range(boot_bar, 0, 100);
+    lv_bar_set_value(boot_bar, 0, LV_ANIM_OFF);
+
+    // Status text — bold, centered below bar
+    boot_status_lbl = lv_label_create(scr_boot);
+    lv_label_set_text(boot_status_lbl, "SYSTEM LOADING...");
+    lv_obj_set_style_text_font(boot_status_lbl, &lv_font_montserrat_12, LV_PART_MAIN);
+    lv_obj_set_style_text_color(boot_status_lbl, COL_ORANGE, LV_PART_MAIN);
+    lv_obj_align(boot_status_lbl, LV_ALIGN_BOTTOM_MID, 0, -12);
+
+    // Subtle horizontal line separating logo from bar area
+    lv_obj_t* hdiv = lv_obj_create(scr_boot);
+    lv_obj_set_size(hdiv, 420, 1);
+    lv_obj_set_pos(hdiv, 30, 218);
+    lv_obj_set_style_bg_color(hdiv, lv_color_make(50, 35, 10), LV_PART_MAIN);
+    lv_obj_set_style_border_width(hdiv, 0, LV_PART_MAIN);
+}
+
+// Call this during boot to advance the bar and update the status label
+void boot_progress(int pct, const char* status) {
+    if (boot_bar)        lv_bar_set_value(boot_bar, pct, LV_ANIM_ON);
+    if (boot_status_lbl) lv_label_set_text(boot_status_lbl, status);
+    lv_timer_handler();
+    delay(20);  // let LVGL render before next blocking operation
+}
+
 // ─── WIFI ICON UPDATE ────────────────────────────────────────────────────────
 void update_wifi_icon() {
     if (lbl_wifi_icon == nullptr) return;
@@ -578,7 +674,7 @@ void show_wifi_popup() {
     lv_scr_load(scr_wifi);
 }
 
-// ─── TOOLHEAD BUTTON CALLBACK ────────────────────────────────────────────────
+// ─── TOOLHEAD CALLBACK ───────────────────────────────────────────────────────
 static void cb_toolhead(lv_event_t* e) {
     int ch = (int)(intptr_t)lv_event_get_user_data(e);
     g_selected_toolhead = ch;
@@ -592,7 +688,6 @@ static void cb_toolhead(lv_event_t* e) {
     else         lv_obj_add_style(btn_storage, &style_btn_inactive, LV_PART_MAIN);
 }
 
-// ─── SAVE BUTTON CALLBACK ────────────────────────────────────────────────────
 static void cb_save(lv_event_t* e) {
     if (g_saving) return;
     g_saving = true;
@@ -618,7 +713,6 @@ void build_screen_idle() {
     lv_obj_set_style_text_color(lbl_title, lv_color_make(0, 200, 255), LV_PART_MAIN);
     lv_obj_align(lbl_title, LV_ALIGN_LEFT_MID, 16, 0);
 
-    // WiFi icon — tappable, red/green based on actual connection state
     lbl_wifi_icon = lv_label_create(hdr);
     lv_label_set_text(lbl_wifi_icon, LV_SYMBOL_WIFI);
     lv_obj_set_style_text_font(lbl_wifi_icon, &lv_font_montserrat_16, LV_PART_MAIN);
@@ -629,7 +723,6 @@ void build_screen_idle() {
         show_wifi_popup();
     }, LV_EVENT_CLICKED, nullptr);
 
-    // Centered idle content
     lv_obj_t* icon = lv_label_create(scr_idle);
     lv_label_set_text(icon, LV_SYMBOL_UPLOAD);
     lv_obj_set_style_text_font(icon, &lv_font_montserrat_48, LV_PART_MAIN);
@@ -667,7 +760,6 @@ void build_screen_spool() {
     lv_obj_set_style_text_font(lbl_hdr, &lv_font_montserrat_14, LV_PART_MAIN);
     lv_obj_align(lbl_hdr, LV_ALIGN_LEFT_MID, 12, 0);
 
-    // Left column
     color_swatch = lv_obj_create(scr_spool);
     lv_obj_set_size(color_swatch, 52, 52);
     lv_obj_set_pos(color_swatch, 12, 48);
@@ -699,14 +791,12 @@ void build_screen_spool() {
     lv_obj_set_style_text_font(lbl_uid, &lv_font_montserrat_10, LV_PART_MAIN);
     lv_obj_set_pos(lbl_uid, 12, 108);
 
-    // Divider
     lv_obj_t* vdiv = lv_obj_create(scr_spool);
     lv_obj_set_size(vdiv, 1, 268);
     lv_obj_set_pos(vdiv, 228, 44);
     lv_obj_set_style_bg_color(vdiv, lv_color_make(30, 50, 90), LV_PART_MAIN);
     lv_obj_set_style_border_width(vdiv, 0, LV_PART_MAIN);
 
-    // Right column
     lv_obj_t* lbl_w_title = lv_label_create(scr_spool);
     lv_label_set_text(lbl_w_title, "REMAINING");
     lv_obj_set_style_text_color(lbl_w_title, lv_color_make(60, 90, 140), LV_PART_MAIN);
@@ -869,8 +959,7 @@ void build_screen_unknown() {
     lv_obj_set_style_border_width(btn_dismiss, 1, LV_PART_MAIN);
     lv_obj_set_style_shadow_width(btn_dismiss, 0, LV_PART_MAIN);
     lv_obj_add_event_cb(btn_dismiss, [](lv_event_t*) {
-        g_state    = StationState::IDLE;
-        g_last_uid = "";
+        g_state = StationState::IDLE; g_last_uid = "";
         lv_scr_load(scr_idle);
     }, LV_EVENT_CLICKED, nullptr);
     lv_obj_t* lbl_d = lv_label_create(btn_dismiss);
@@ -971,7 +1060,7 @@ void setup() {
     digitalWrite(TFT_BL_PIN, HIGH);
 
     tft.begin();
-    tft.setRotation(1);  // Landscape
+    tft.setRotation(1);
     tft.fillScreen(TFT_BLACK);
 
     lv_init();
@@ -993,6 +1082,15 @@ void setup() {
     lv_indev_drv_register(&indev_drv);
 
     setup_styles();
+
+    // Build boot screen first and show it immediately
+    build_screen_boot();
+    lv_scr_load(scr_boot);
+    lv_timer_handler();
+    delay(50);
+
+    // Build all other screens while boot screen is visible
+    boot_progress(10, "INITIALIZING...");
     build_screen_idle();
     build_screen_spool();
     build_screen_saving();
@@ -1000,14 +1098,18 @@ void setup() {
     build_screen_unknown();
     build_screen_error();
     build_screen_wifi();
-    lv_scr_load(scr_idle);
 
+    // HX711
+    boot_progress(30, "SCALE HARDWARE...");
     Serial.println("HX711 init...");
     scale.begin(HX711_DT_PIN, HX711_SCK_PIN);
     scale.set_scale(CALIBRATION_FACTOR);
     // scale.tare(); // uncomment after HX711 is wired
     Serial.println("HX711 ready.");
+    boot_progress(45, "SCALE READY");
 
+    // PN532
+    boot_progress(50, "NFC MODULE...");
     Serial.println("PN532 init...");
     pn532Serial.begin(115200, SERIAL_8N1, PN532_RX_PIN, PN532_TX_PIN);
     nfc.begin();
@@ -1016,29 +1118,50 @@ void setup() {
         Serial.printf("PN532 FW: %d.%d\n", (fw >> 16) & 0xFF, (fw >> 8) & 0xFF);
         nfc.setPassiveActivationRetries(0x01);
         nfc.SAMConfig();
+        boot_progress(65, "NFC READY");
     } else {
         Serial.println("PN532 not found - check wiring and DIP switches (HSU: both DOWN)");
+        boot_progress(65, "NFC NOT FOUND - CHECK WIRING");
+        delay(1500);
     }
 
+    // WiFi — longest step, updates bar incrementally during connect attempts
+    boot_progress(68, "CONNECTING TO WIFI...");
     Serial.printf("Connecting to %s...\n", WIFI_SSID);
     WiFi.begin(WIFI_SSID, WIFI_PASS);
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 20) {
         delay(500);
         lv_timer_handler();
+        // Animate bar from 68→90 during wifi wait
+        int wifi_pct = 68 + (int)((attempts / 20.0) * 22.0);
+        boot_progress(wifi_pct, "CONNECTING TO WIFI...");
         attempts++;
     }
+
     if (WiFi.status() == WL_CONNECTED) {
         g_wifi_ok = true;
         Serial.printf("WiFi OK: %s\n", WiFi.localIP().toString().c_str());
+        boot_progress(95, ("CONNECTED: " + WiFi.localIP().toString()).c_str());
+        delay(600);
     } else {
         g_wifi_ok = false;
-        g_state   = StationState::WIFI_ERROR;
-        lv_scr_load(scr_error);
         Serial.println("WiFi FAILED");
+        boot_progress(95, "WIFI FAILED - CONTINUING OFFLINE");
+        delay(1200);
     }
 
+    boot_progress(100, "READY");
+    delay(500);
+
     update_wifi_icon();
+
+    if (!g_wifi_ok) {
+        g_state = StationState::WIFI_ERROR;
+        lv_scr_load(scr_error);
+    } else {
+        lv_scr_load(scr_idle);
+    }
 }
 
 // ─── MAIN LOOP ───────────────────────────────────────────────────────────────
@@ -1047,7 +1170,6 @@ unsigned long g_saved_ts = 0;
 void loop() {
     lv_timer_handler();
 
-    // Read HX711
     if (scale.is_ready()) {
         float raw = scale.get_units(1);
         if (raw < 0) raw = 0;
@@ -1058,7 +1180,6 @@ void loop() {
         g_weight_stable = is_weight_stable();
     }
 
-    // Poll PN532
     uint8_t uid[7];
     uint8_t uid_len;
     bool tag_found = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uid_len, 50);
@@ -1110,10 +1231,8 @@ void loop() {
         }
     }
 
-    // Handle save
     if (g_state == StationState::SAVING && g_saving) do_save();
 
-    // Auto-return from saved screen after 3s
     if (g_state == StationState::SAVED) {
         if (g_saved_ts == 0) g_saved_ts = millis();
         if (millis() - g_saved_ts > 3000) {
