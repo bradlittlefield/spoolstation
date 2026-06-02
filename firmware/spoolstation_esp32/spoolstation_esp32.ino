@@ -62,11 +62,28 @@
 #include <lvgl.h>
 #include <Adafruit_PN532.h>
 
+struct SpoolData {
+    int     id;
+    String  vendor;
+    String  material;
+    String  name;
+    String  color_hex;
+    int     remaining_weight;
+    int     remaining_length_m;
+    int     tare_weight;
+    int     min_temp;
+    int     max_temp;
+    int     bed_temp;
+    String  tag_uid;
+    int     toolhead;
+    bool    valid;
+};
+
 // ─── USER CONFIG ─────────────────────────────────────────────────────────────
 // Edit these before flashing
 
-const char* WIFI_SSID     = "YOUR_WIFI_SSID";
-const char* WIFI_PASS     = "YOUR_WIFI_PASSWORD";
+const char* WIFI_SSID     = "Hyannis Harbor Hotel WiFi";
+const char* WIFI_PASS     = "";
 const char* SPOOLMAN_URL  = "http://192.168.1.XXX:7912/api/v1";   // RPi IP
 const char* BRIDGE_URL    = "http://192.168.1.XXX:8765";           // RPi bridge
 
@@ -149,23 +166,6 @@ HardwareSerial pn532Serial(2);
 Adafruit_PN532 nfc(pn532Serial);
 
 // ─── STATE ────────────────────────────────────────────────────────────────────
-struct SpoolData {
-    int     id;
-    String  vendor;
-    String  material;
-    String  name;
-    String  color_hex;
-    int     remaining_weight;
-    int     remaining_length_m;
-    int     tare_weight;
-    int     min_temp;
-    int     max_temp;
-    int     bed_temp;
-    String  tag_uid;
-    int     toolhead;
-    bool    valid;
-};
-
 enum class StationState {
     IDLE,           // waiting for spool
     TAG_READ,       // tag detected, reading weight
@@ -936,18 +936,25 @@ void setup() {
     Serial.println("SpoolStation booting...");
 
     // Backlight on
+    Serial.println("Backlight...");
     pinMode(TFT_BL_PIN, OUTPUT);
     digitalWrite(TFT_BL_PIN, HIGH);
 
     // Display init
+    Serial.println("TFT begin...");
     tft.begin();
+    Serial.println("TFT rotation...");
     tft.setRotation(0);
+    Serial.println("TFT fill...");
     tft.fillScreen(TFT_BLACK);
+    Serial.println("Display done.");
 
     // LVGL init
+    Serial.println("LVGL init...");
     lv_init();
+    Serial.println("LVGL buf init...");
     lv_disp_draw_buf_init(&draw_buf, buf, nullptr, LV_BUF_SIZE);
-
+    Serial.println("LVGL disp drv...");
     static lv_disp_drv_t disp_drv;
     lv_disp_drv_init(&disp_drv);
     disp_drv.hor_res   = SCREEN_W;
@@ -955,32 +962,47 @@ void setup() {
     disp_drv.flush_cb  = lv_disp_flush;
     disp_drv.draw_buf  = &draw_buf;
     lv_disp_drv_register(&disp_drv);
+    Serial.println("LVGL done.");
 
     // Touch init
+    Serial.println("Touch init...");
     gt911_init();
+    Serial.println("Touch drv...");
     static lv_indev_drv_t indev_drv;
     lv_indev_drv_init(&indev_drv);
     indev_drv.type     = LV_INDEV_TYPE_POINTER;
     indev_drv.read_cb  = lv_touch_read;
     lv_indev_drv_register(&indev_drv);
+    Serial.println("Touch done.");
 
     // Build UI
+    Serial.println("Building UI...");
     setup_styles();
+    Serial.println("Styles done.");
     build_screen_idle();
+    Serial.println("Idle screen done.");
     build_screen_spool();
+    Serial.println("Spool screen done.");
     build_screen_saving();
+    Serial.println("Saving screen done.");
     build_screen_saved();
+    Serial.println("Saved screen done.");
     build_screen_unknown();
+    Serial.println("Unknown screen done.");
     build_screen_error();
+    Serial.println("Error screen done.");
     lv_scr_load(scr_idle);
+    Serial.println("UI done.");
 
     // HX711
+    Serial.println("HX711 init...");
     scale.begin(HX711_DT_PIN, HX711_SCK_PIN);
     scale.set_scale(CALIBRATION_FACTOR);
-    scale.tare();
-    Serial.println("HX711 ready");
+    //scale.tare(); // commented out until hx711 is wired
+    Serial.println("HX711 ready.");
 
     // PN532 on UART2
+    Serial.println("PN532 init...");
     pn532Serial.begin(115200, SERIAL_8N1, PN532_RX_PIN, PN532_TX_PIN);
     nfc.begin();
     uint32_t fw = nfc.getFirmwareVersion();
@@ -991,6 +1013,7 @@ void setup() {
     } else {
         Serial.println("PN532 not found — check wiring and jumper (HSU mode)");
     }
+    Serial.println("PN532 done.");
 
     // WiFi
     Serial.printf("Connecting to %s...\n", WIFI_SSID);
